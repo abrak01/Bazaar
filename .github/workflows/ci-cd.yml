@@ -1,0 +1,220 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  # ========== SMART CONTRACT ==========
+  contract-check:
+    name: Contract Check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts/ai-agent-marketplace
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          target: wasm32-unknown-unknown
+          
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+        
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+        
+      - name: Build
+        run: cargo build --target wasm32-unknown-unknown --release
+        
+      - name: Test
+        run: cargo test --all
+
+  contract-optimize:
+    name: Optimize WASM
+    needs: contract-check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts/ai-agent-marketplace
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          target: wasm32-unknown-unknown
+          
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          
+      - name: Build release
+        run: cargo build --target wasm32-unknown-unknown --release
+        
+      - name: Install wasm-opt
+        run: |
+          curl -L https://github.com/WebAssembly/binaryen/releases/download/version_115/binaryen-version_115-x86_64-linux.tar.gz | tar -xz
+          echo "$(pwd)/binaryen/bin" >> $GITHUB_PATH
+          
+      - name: Optimize WASM
+        run: |
+          wasm-opt -Oz \
+            target/wasm32-unknown-unknown/release/ai_agent_marketplace.wasm \
+            -o target/wasm32-unknown-unknown/release/ai_agent_marketplace.opt.wasm
+            
+      - name: Check size
+        run: |
+          SIZE=$(wc -c < target/wasm32-unknown-unknown/release/ai_agent_marketplace.opt.wasm)
+          echo "WASM size: $((SIZE / 1024)) KB"
+          if [ $SIZE -gt 1000000 ]; then
+            echo "::warning::WASM exceeds 1MB"
+          fi
+          
+      - name: Upload WASM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: contract-wasm
+          path: target/wasm32-unknown-unknown/release/ai_agent_marketplace.opt.wasm
+          retention-days: 7
+
+  # ========== FRONTEND ==========
+  frontend-lint:
+    name: Frontend Lint & TypeCheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend/ai-agent-marketplace
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          
+      - name: Install pnpm
+        run: corepack enable pnpm
+        
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        
+      - name: TypeCheck
+        run: pnpm tsc --noEmit
+        
+      - name: Lint
+        run: pnpm lint
+        
+      - name: Test
+        run: pnpm test --run
+
+  frontend-build:
+    name: Build Frontend
+    needs: frontend-lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend/ai-agent-marketplace
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          
+      - name: Install pnpm
+        run: corepack enable pnpm
+        
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        
+      - name: Build
+        run: pnpm build
+        env:
+          VITE_CONTRACT_ID: ${{ secrets.VITE_CONTRACT_ID }}
+          VITE_RPC_URL: ${{ secrets.VITE_RPC_URL }}
+          VITE_NETWORK_PASSPHRASE: ${{ secrets.VITE_NETWORK_PASSPHRASE }}
+          VITE_USDC_CONTRACT_ID: ${{ secrets.VITE_USDC_CONTRACT_ID }}
+          
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: dist/
+          retention-days: 7
+
+  # ========== DEPLOY ==========
+  deploy-preview:
+    name: Deploy Preview
+    needs: [contract-optimize, frontend-build]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Vercel Preview
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args: '--prod=false'
+        env:
+          VITE_CONTRACT_ID: ${{ secrets.VITE_CONTRACT_ID }}
+          VITE_RPC_URL: ${{ secrets.VITE_RPC_URL }}
+          VITE_NETWORK_PASSPHRASE: ${{ secrets.VITE_NETWORK_PASSPHRASE }}
+          VITE_USDC_CONTRACT_ID: ${{ secrets.VITE_USDC_CONTRACT_ID }}
+
+  deploy-production:
+    name: Deploy Production
+    needs: [contract-optimize, frontend-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Deploy to Vercel Production
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args: '--prod'
+        env:
+          VITE_CONTRACT_ID: ${{ secrets.VITE_CONTRACT_ID }}
+          VITE_RPC_URL: ${{ secrets.VITE_RPC_URL }}
+          VITE_NETWORK_PASSPHRASE: ${{ secrets.VITE_NETWORK_PASSPHRASE }}
+          VITE_USDC_CONTRACT_ID: ${{ secrets.VITE_USDC_CONTRACT_ID }}
+          
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Release v${{ github.run_number }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

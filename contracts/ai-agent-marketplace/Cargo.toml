@@ -1,0 +1,12 @@
+[package]
+name = "ai-agent-marketplace"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { version = "21.7.7", features = ["alloc", "testutils"] }
+soroban-token-sdk = "21.7.7"
