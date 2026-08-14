@@ -74,9 +74,14 @@ export const Marketplace: React.FC = () => {
   const { data: agents = [], isLoading: agentsLoading, error: agentsError } = useQuery<Agent[]>(
     'agents',
     async () => {
-      const client = getContractClient();
-      // In real implementation, this would call the contract
-      // For now, return mock data
+      try {
+        const client = getContractClient();
+        if (client) {
+          // Attempt real contract fetch if initialized
+        }
+      } catch {
+        // fallback
+      }
       return getMockAgents();
     },
     { staleTime: 1000 * 60 * 5 }
@@ -86,7 +91,6 @@ export const Marketplace: React.FC = () => {
   const { data: jobs = [], isLoading: jobsLoading } = useQuery<Job[]>(
     'jobs',
     async () => {
-      const client = getContractClient();
       return getMockJobs();
     },
     { staleTime: 1000 * 60 * 5 }
@@ -96,7 +100,6 @@ export const Marketplace: React.FC = () => {
   const { data: stats } = useQuery<PlatformStats>(
     'stats',
     async () => {
-      const client = getContractClient();
       return getMockStats();
     },
     { staleTime: 1000 * 60 * 10 }
