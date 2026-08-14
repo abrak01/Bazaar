@@ -202,6 +202,7 @@ pub enum DataKey {
     AgentSkills(u64),
     SkillAgents(String),
     PlatformStats,
+    IsPaused,
 }
 
 #[contracttype]
@@ -269,6 +270,7 @@ pub enum Error {
     DisputeResolved = 48,
     EscrowAlreadyRefunded = 49,
     InvalidDisputeEvidence = 50,
+    ContractPaused = 51,
 }
 
 #[contract]
