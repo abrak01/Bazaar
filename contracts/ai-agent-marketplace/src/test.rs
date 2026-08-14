@@ -528,3 +528,21 @@ fn test_leave_review() {
     let stats = marketplace.get_platform_stats();
     assert_eq!(stats.total_jobs, 1);
 }
+
+#[test]
+fn test_set_paused_and_circuit_breaker() {
+    let e = Env::default();
+    e.mock_all_auths();
+
+    let admin = Address::generate(&e);
+    let usdc = create_token_contract(&e);
+    let marketplace = create_marketplace_contract(&e, &admin, &usdc.address());
+
+    assert!(!marketplace.is_paused());
+
+    marketplace.set_paused(&admin, &true);
+    assert!(marketplace.is_paused());
+
+    marketplace.set_paused(&admin, &false);
+    assert!(!marketplace.is_paused());
+}
