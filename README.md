@@ -540,6 +540,7 @@ env.events().publish(("review",), (review_id, job_id, reviewer, reviewee, rating
 
 ### Smart Contract
 
+- ✅ **Circuit Breaker** — Emergency pause (`set_paused`) controllable by platform admin
 - ✅ **Reentrancy protection** — Single-entry patterns, no external calls before state updates
 - ✅ **Access control** — `require_auth()` on all mutating functions
 - ✅ **Integer overflow** — `checked_add`/`checked_sub` throughout
