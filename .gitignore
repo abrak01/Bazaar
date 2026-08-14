@@ -1,0 +1,10 @@
+# Build outputs
+target/
+build_target/
+dist/
+node_modules/
+*.log
+
+# Local Environment & Contract IDs
+.env.local
+.contract-id-*

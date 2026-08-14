@@ -363,7 +363,7 @@ export const Marketplace: React.FC = () => {
               </div>
             ) : filteredAgents.length === 0 ? (
               <EmptyState
-                icon={Users}
+                icon="🤖"
                 title="No agents found"
                 description="Try adjusting your filters or search query"
                 action={<Button onClick={clearFilters}>Clear Filters</Button>}
@@ -392,7 +392,7 @@ export const Marketplace: React.FC = () => {
               </div>
             ) : filteredJobs.length === 0 ? (
               <EmptyState
-                icon={Search}
+                icon="🔍"
                 title="No open jobs found"
                 description="No jobs match your current filters"
                 action={<Button onClick={clearFilters}>Clear Filters</Button>}
@@ -418,7 +418,7 @@ const AgentCard: React.FC<{ agent: Agent }> = ({ agent }) => {
     .map(([k]) => k);
 
   return (
-    <Link to={`/agent/${agent.id}`}>
+    <div className="h-full">
       <Card className="group hover:shadow-lg hover:border-primary/30 transition-all duration-300 h-full flex flex-col">
         <CardContent className="p-5 flex flex-col h-full">
           <div className="flex items-start justify-between mb-3">
@@ -480,12 +480,12 @@ const AgentCard: React.FC<{ agent: Agent }> = ({ agent }) => {
             </div>
           </div>
 
-          <Button className="mt-4 w-full" variant="outline" asChild>
-            <Link to={`/agent/${agent.id}`}>View Profile →</Link>
-          </Button>
+          <Link to={`/agent/${agent.id}`}>
+            <Button className="mt-4 w-full" variant="outline">View Profile →</Button>
+          </Link>
         </CardContent>
       </Card>
-    </Link>
+    </div>
   );
 };
 
@@ -496,53 +496,51 @@ const AgentCardList: React.FC<{ agent: Agent }> = ({ agent }) => {
     .map(([k]) => k);
 
   return (
-    <Link to={`/agent/${agent.id}`}>
-      <Card className="group hover:shadow-md hover:border-primary/30 transition-all">
-        <CardContent className="p-4">
-          <div className="flex flex-col md:flex-row md:items-center gap-4">
-            <div className="flex items-center gap-3 w-full md:w-auto">
-              <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-primary to-stellar flex items-center justify-center text-3xl">
-                🤖
-              </div>
-              <div>
-                <h3 className="font-semibold text-lg text-foreground">{agent.name}</h3>
-                <p className="text-sm text-muted-foreground">{agent.owner.slice(0, 12)}...</p>
-              </div>
+    <Card className="group hover:shadow-md hover:border-primary/30 transition-all">
+      <CardContent className="p-4">
+        <div className="flex flex-col md:flex-row md:items-center gap-4">
+          <div className="flex items-center gap-3 w-full md:w-auto">
+            <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-primary to-stellar flex items-center justify-center text-3xl">
+              🤖
             </div>
-            
-            <div className="flex flex-wrap gap-1.5 flex-1 md:w-auto">
-              {agent.skills.slice(0, 6).map(skill => (
-                <Badge
-                  key={skill}
-                  variant={verifiedSkills.includes(skill) ? 'default' : 'outline'}
-                  className={clsx(getSkillColor(skill), 'text-xs')}
-                >
-                  {skill}
-                  {verifiedSkills.includes(skill) && <CheckCircle className="ml-1 h-2.5 w-2.5" />}
-                </Badge>
-              ))}
-              {agent.skills.length > 6 && (
-                <Badge variant="secondary" className="text-xs">+{agent.skills.length - 6}</Badge>
-              )}
-            </div>
-
-            <div className="flex items-center gap-6 md:w-auto w-full justify-between">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Star className="h-4 w-4 text-yellow-500" />
-                <span className="font-semibold text-foreground">{agent.reputation.toFixed(1)}</span>
-              </div>
-              <div className="text-right">
-                <p className="font-semibold text-foreground">{formatPrice(agent.pricePerTask)}</p>
-                <p className="text-xs text-muted-foreground">per task</p>
-              </div>
-              <Button size="sm" variant="outline" asChild>
-                <Link to={`/agent/${agent.id}`}>View</Link>
-              </Button>
+            <div>
+              <h3 className="font-semibold text-lg text-foreground">{agent.name}</h3>
+              <p className="text-sm text-muted-foreground">{agent.owner.slice(0, 12)}...</p>
             </div>
           </div>
-        </CardContent>
-      </Card>
-    </Link>
+          
+          <div className="flex flex-wrap gap-1.5 flex-1 md:w-auto">
+            {agent.skills.slice(0, 6).map(skill => (
+              <Badge
+                key={skill}
+                variant={verifiedSkills.includes(skill) ? 'default' : 'outline'}
+                className={clsx(getSkillColor(skill), 'text-xs')}
+              >
+                {skill}
+                {verifiedSkills.includes(skill) && <CheckCircle className="ml-1 h-2.5 w-2.5" />}
+              </Badge>
+            ))}
+            {agent.skills.length > 6 && (
+              <Badge variant="secondary" className="text-xs">+{agent.skills.length - 6}</Badge>
+            )}
+          </div>
+
+          <div className="flex items-center gap-6 md:w-auto w-full justify-between">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Star className="h-4 w-4 text-yellow-500" />
+              <span className="font-semibold text-foreground">{agent.reputation.toFixed(1)}</span>
+            </div>
+            <div className="text-right">
+              <p className="font-semibold text-foreground">{formatPrice(agent.pricePerTask)}</p>
+              <p className="text-xs text-muted-foreground">per task</p>
+            </div>
+            <Link to={`/agent/${agent.id}`}>
+              <Button size="sm" variant="outline">View</Button>
+            </Link>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 };
 
@@ -592,9 +590,9 @@ const JobCard: React.FC<{ job: Job }> = ({ job }) => {
           </div>
 
           <div className="md:w-48 flex-shrink-0">
-            <Button className="w-full" asChild>
-              <Link to={`/job/${job.id}`}>View Details →</Link>
-            </Button>
+            <Link to={`/job/${job.id}`}>
+              <Button className="w-full">View Details →</Button>
+            </Link>
           </div>
         </div>
       </CardContent>
@@ -804,6 +802,25 @@ const formatPrice = (price: number) => {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(price / 10000000);
+};
+
+const formatNumber = (num: number) => {
+  return new Intl.NumberFormat('en-US').format(num);
+};
+
+const getSkillColor = (skill: string) => {
+  const colors = [
+    'border-blue-500/30 text-blue-400 bg-blue-500/10',
+    'border-purple-500/30 text-purple-400 bg-purple-500/10',
+    'border-emerald-500/30 text-emerald-400 bg-emerald-500/10',
+    'border-amber-500/30 text-amber-400 bg-amber-500/10',
+    'border-cyan-500/30 text-cyan-400 bg-cyan-500/10',
+  ];
+  let hash = 0;
+  for (let i = 0; i < skill.length; i++) {
+    hash = skill.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
 };
 
 // Re-export for use in other components

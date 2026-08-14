@@ -396,6 +396,4 @@ export const Landing: React.FC = () => {
       </footer>
     </div>
   );
-};
-
-import { CheckCircle } from 'lucide-react';
+};

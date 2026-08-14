@@ -9,9 +9,10 @@ import { Textarea } from '@/components/ui/Textarea';
 import { useWallet } from '@/contexts/WalletContext';
 import { useStellar } from '@/contexts/StellarContext';
 import { 
-  Wallet, User, Shield, Settings, Bell, Key, 
+  Wallet, User, Shield, Settings as SettingsIcon, Bell, Key, 
   LogOut, Moon, Sun, Globe, ShieldCheck, 
-  CreditCard, History, Download, Upload, Eye, EyeOff
+  CreditCard, History, Download, Upload, Eye, EyeOff,
+  Activity, FileText, Star, CheckCircle
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -66,13 +67,13 @@ export const Settings: React.FC = () => {
       </header>
 
       <main className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-8">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+        <Tabs value={activeTab} onValueChange={(val: any) => setActiveTab(val)} className="space-y-6">
           <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="profile"><User className="h-4 w-4 mr-2" /> Profile</TabsTrigger>
             <TabsTrigger value="wallet"><Wallet className="h-4 w-4 mr-2" /> Wallet</TabsTrigger>
             <TabsTrigger value="notifications"><Bell className="h-4 w-4 mr-2" /> Notifications</TabsTrigger>
             <TabsTrigger value="security"><Shield className="h-4 w-4 mr-2" /> Security</TabsTrigger>
-            <TabsTrigger value="appearance"><Settings className="h-4 w-4 mr-2" /> Appearance</TabsTrigger>
+            <TabsTrigger value="appearance"><SettingsIcon className="h-4 w-4 mr-2" /> Appearance</TabsTrigger>
           </TabsList>
 
           {/* Profile Tab */}
@@ -401,7 +402,7 @@ export const Settings: React.FC = () => {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Settings className="h-5 w-5" />
+                  <SettingsIcon className="h-5 w-5" />
                   Data & Privacy
                 </CardTitle>
               </CardHeader>

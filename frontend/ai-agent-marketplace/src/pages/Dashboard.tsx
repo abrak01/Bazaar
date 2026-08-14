@@ -15,7 +15,15 @@ import { useStellar } from '@/contexts/StellarContext';
 import { formatPrice, getSkillColor } from '@/pages/Marketplace';
 import { clsx } from 'clsx';
 import { format, formatDistanceToNow } from 'date-fns';
-import { tabs } from '@/components/ui/Tabs';
+
+const statusConfig = {
+  Open: { label: 'Open', color: 'success' as const, icon: DollarSign },
+  InProgress: { label: 'In Progress', color: 'default' as const, icon: Clock },
+  Completed: { label: 'Completed', color: 'success' as const, icon: CheckCircle },
+  Disputed: { label: 'Disputed', color: 'destructive' as const, icon: AlertCircle },
+  Cancelled: { label: 'Cancelled', color: 'secondary' as const, icon: AlertCircle },
+  Refunded: { label: 'Refunded', color: 'secondary' as const, icon: AlertCircle },
+};
 
 interface Job {
   id: number;
@@ -112,14 +120,7 @@ export const Dashboard: React.FC = () => {
     { staleTime: 1000 * 60 * 10 }
   );
 
-  const statusConfig = {
-    Open: { label: 'Open', color: 'success' as const, icon: DollarSign },
-    InProgress: { label: 'In Progress', color: 'default' as const, icon: Clock },
-    Completed: { label: 'Completed', color: 'success' as const, icon: CheckCircle },
-    Disputed: { label: 'Disputed', color: 'destructive' as const, icon: AlertCircle },
-    Cancelled: { label: 'Cancelled', color: 'secondary' as const, icon: AlertCircle },
-    Refunded: { label: 'Refunded', color: 'secondary' as const, icon: AlertCircle },
-  };
+
 
   const tabsList = [
     { id: 'overview', label: 'Overview', icon: TrendingUp },

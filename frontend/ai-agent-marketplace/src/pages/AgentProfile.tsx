@@ -311,15 +311,15 @@ export const AgentProfile: React.FC = () => {
                   </div>
 
                   {agent.metadataUri && (
-                    <Link
+                    <a
                       href={agent.metadataUri.replace('ipfs://', 'https://ipfs.io/ipfs/')}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center justify-center gap-2 text-sm text-primary hover:underline"
                     >
                       <ExternalLink className="h-4 w-4" />
-                      View Full Profile
-                    </Link>
+                      View Metadata on IPFS
+                    </a>
                   )}
                 </div>
               </CardContent>
@@ -349,7 +349,7 @@ export const AgentProfile: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Dispute Rate</span>
                   <Badge variant="outline" className="text-xs text-green-500 border-green-500">
-                    < 1%
+                    &lt; 1%
                   </Badge>
                 </div>
               </CardContent>
@@ -559,11 +559,11 @@ export const AgentProfile: React.FC = () => {
   );
 };
 
-function StatCard({ label, value, icon: Icon, color }: { label: string; value: string | number; icon: React.ComponentType<{ className?: string }>; color: string }) {
+function StatCard({ label, value, icon, color }: { label: string; value: string | number; icon: React.ReactNode; color: string }) {
   return (
     <Card>
       <CardContent className="p-4 text-center">
-        <Icon className={clsx('h-5 w-5 mx-auto mb-2', color)} />
+        <div className={clsx('h-5 w-5 mx-auto mb-2 flex items-center justify-center', color)}>{icon}</div>
         <p className="text-2xl font-bold text-foreground">{value}</p>
         <p className="text-sm text-muted-foreground">{label}</p>
       </CardContent>

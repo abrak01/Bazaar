@@ -26,10 +26,11 @@ export interface StellarContextType {
   isConnected: boolean;
   connect: (config: ContractConfig) => Promise<void>;
   disconnect: () => void;
-  simulateTransaction: (tx: TransactionBuilder) => Promise<SorobanRpc.Api.SimulateTransactionResponse>;
-  sendTransaction: (tx: TransactionBuilder, signFn: (tx: string) => Promise<string>) => Promise<SorobanRpc.Api.SendTransactionResponse>;
+  simulateTransaction: (tx: any) => Promise<any>;
+  sendTransaction: (tx: any, signFn: any) => Promise<any>;
   getContractData: (key: xdr.ScVal, durability?: 'persistent' | 'temporary') => Promise<xdr.ScVal | null>;
   invokeContract: (method: string, ...args: xdr.ScVal[]) => Promise<xdr.ScVal | null>;
+  getContractClient: () => any;
 }
 
 const StellarContext = createContext<StellarContextType | null>(null);
@@ -98,8 +99,8 @@ export const StellarProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (!rpc || !config) throw new Error('Not connected');
     
     try {
-      const result = await rpc.getContractData(config.contractId, key, durability);
-      return result.val;
+      const result: any = await (rpc as any).getContractData(config.contractId, key, durability as any);
+      return result?.val ?? null;
     } catch (error) {
       if ((error as Error).message.includes('not found')) return null;
       throw error;
@@ -109,7 +110,11 @@ export const StellarProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const invokeContract = useCallback(async (method: string, ...args: xdr.ScVal[]) => {
     if (!contract || !rpc || !config) throw new Error('Not connected');
     
-    const tx = new TransactionBuilder(config.networkPassphrase, BASE_FEE)
+    const account = new (TransactionBuilder as any).Account('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', '0');
+    const tx = new (TransactionBuilder as any)(account, {
+      fee: BASE_FEE,
+      networkPassphrase: config.networkPassphrase,
+    })
       .addOperation(contract.call(method, ...args))
       .setTimeout(300)
       .build();
@@ -120,7 +125,7 @@ export const StellarProvider: React.FC<{ children: React.ReactNode }> = ({ child
       throw new Error(`Simulation failed: ${simResult.error}`);
     }
     
-    return simResult.result?.retval ?? null;
+    return (simResult as any).result?.retval ?? null;
   }, [contract, rpc, config]);
 
   useEffect(() => {
@@ -147,6 +152,7 @@ export const StellarProvider: React.FC<{ children: React.ReactNode }> = ({ child
       sendTransaction,
       getContractData,
       invokeContract,
+      getContractClient: () => null,
     }}>
       {children}
     </StellarContext.Provider>
@@ -154,7 +160,7 @@ export const StellarProvider: React.FC<{ children: React.ReactNode }> = ({ child
 };
 
 // Type conversion helpers
-export const scValToNative = <T>(val: xdr.ScVal): T => {
+export const parseScVal = <T extends unknown>(val: xdr.ScVal): T => {
   return scValToNative(val) as T;
 };
 
@@ -174,18 +180,18 @@ export const stringToScVal = (val: string): xdr.ScVal => {
   return nativeToScVal(val, { type: 'string' });
 };
 
-export const vecToScVal = (arr: unknown[], type: string): xdr.ScVal => {
-  return nativeToScVal(arr, { type: `vec<${type}>` });
+export const vecToScVal = (arr: unknown[], typeStr: string): xdr.ScVal => {
+  return nativeToScVal(arr, { type: `vec<${typeStr}>` as any });
 };
 
 export const mapToScVal = (entries: [unknown, unknown][], keyType: string, valType: string): xdr.ScVal => {
-  return nativeToScVal(entries, { type: `map<${keyType},${valType}>` });
+  return nativeToScVal(entries, { type: `map<${keyType},${valType}>` as any });
 };
 
-export const optionToScVal = (val: unknown | null, type: string): xdr.ScVal => {
-  return nativeToScVal(val ?? null, { type: `option<${type}>` });
+export const optionToScVal = (val: unknown | null, typeStr: string): xdr.ScVal => {
+  return nativeToScVal(val ?? null, { type: `option<${typeStr}>` as any });
 };
 
 export const bytesN32ToScVal = (val: Buffer | Uint8Array): xdr.ScVal => {
-  return nativeToScVal(val, { type: 'bytes<32>' });
+  return nativeToScVal(val, { type: 'bytes<32>' as any });
 };

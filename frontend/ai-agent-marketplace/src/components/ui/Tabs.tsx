@@ -30,6 +30,7 @@ export const TabsList = ({ children, className }: TabsListProps) => (
 
 interface TabsTriggerProps {
   value: string;
+  onValueChange?: (value: string) => void;
   children: React.ReactNode;
   disabled?: boolean;
   className?: string;
