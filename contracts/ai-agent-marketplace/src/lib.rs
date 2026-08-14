@@ -335,7 +335,7 @@ impl AiAgentMarketplace {
             total_disputes: 0,
             avg_job_completion_time: 0,
         };
-        env.storage().instance().set(&DataKey::PlatformStats, &stats);
+        env.storage().instance().set(&DataKey::IsPaused, &false);
 
         // Emit initialization event
         env.events().publish(
@@ -344,6 +344,27 @@ impl AiAgentMarketplace {
         );
 
         Ok(())
+    }
+
+    /// Admin function to pause or unpause contract operations
+    pub fn set_paused(env: Env, admin: Address, paused: bool) -> Result<(), Error> {
+        admin.require_auth();
+        let config = Self::get_config(&env)?;
+        if admin != config.admin {
+            return Err(Error::Unauthorized);
+        }
+
+        env.storage().instance().set(&DataKey::IsPaused, &paused);
+        env.events().publish(
+            (symbol_short!("pause"),),
+            (admin, paused),
+        );
+        Ok(())
+    }
+
+    /// Check if contract is paused
+    pub fn is_paused(env: Env) -> bool {
+        env.storage().instance().get(&DataKey::IsPaused).unwrap_or(false)
     }
 
     /// Register a new AI agent
