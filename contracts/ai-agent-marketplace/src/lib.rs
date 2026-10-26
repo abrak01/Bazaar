@@ -1313,6 +1313,14 @@ impl AiAgentMarketplace {
     ///   - Sets `escrow.status = EscrowStatus::Refunded`.
     ///   - Sets `job.status    = JobStatus::Refunded`.
     ///   - Emits a `refund` event.
+    pub fn reclaim_expired_escrow(
+        env: Env,
+        client: Address,
+        job_id: u64,
+    ) -> Result<(), Error> {
+        todo!()
+    }
+
     /// Get agent by ID
     pub fn get_agent(env: Env, agent_id: u64) -> Result<Agent, Error> {
         Self::get_agent(&env, agent_id)
