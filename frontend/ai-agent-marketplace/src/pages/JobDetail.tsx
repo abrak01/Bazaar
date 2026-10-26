@@ -192,6 +192,7 @@ const ESCROW_EXPIRY_DAYS = 30;
   const isExpired = timeLeft <= 0;
 
   // Escrow expiry: client can reclaim funds if escrow is still Funded after ESCROW_EXPIRY_DAYS
+  // Multiply by 1000: escrowCreatedAt is in seconds (Unix), Date.now() is in ms
   const escrowExpiryTime = job.escrowCreatedAt
     ? (job.escrowCreatedAt + ESCROW_EXPIRY_DAYS * 86400) * 1000
     : null;
