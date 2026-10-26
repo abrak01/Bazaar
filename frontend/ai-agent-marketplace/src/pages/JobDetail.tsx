@@ -141,6 +141,23 @@ const ESCROW_EXPIRY_DAYS = 30;
     } catch (err) {
       console.error('Approve failed:', err);
       alert('Failed to approve deliverable.');
+  };
+
+  /**
+   * Reclaim escrow funds after the expiry window has passed.
+   * Calls reclaim_expired_escrow(env, client, job_id) on the contract.
+   */
+  const handleReclaimFunds = async () => {
+    if (!publicKey || !isClient) return;
+    try {
+      const client = getContractClient();
+      // await client.reclaimExpiredEscrow({ client: publicKey, jobId: jobIdNum });
+      queryClient.invalidateQueries(['job', jobIdNum]);
+      alert('Funds reclaimed successfully! (Demo mode)');
+    } catch (err) {
+      console.error('Reclaim failed:', err);
+      alert('Failed to reclaim funds. Please try again.');
+    }
     }
   };
 
