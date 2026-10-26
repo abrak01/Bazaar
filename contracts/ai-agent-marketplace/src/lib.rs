@@ -846,6 +846,7 @@ impl AiAgentMarketplace {
         };
 
         env.storage().instance().set(&DataKey::Escrow(escrow_id), &escrow);
+        // EscrowByJob maps job_id -> escrow_id, created atomically in accept_bid.
         env.storage().instance().set(&DataKey::EscrowByJob(job_id), &escrow_id);
 
         // Update job
