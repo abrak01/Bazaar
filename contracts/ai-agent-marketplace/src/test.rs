@@ -580,6 +580,11 @@ fn test_set_paused_and_circuit_breaker() {
 
     let job = marketplace.get_job(&job_id);
     assert_eq!(job.status, JobStatus::InProgress);
+
+    // Advance the ledger past the 30-day expiry window
+    e.ledger().with_mut(|li| {
+        li.timestamp += 30 * 86_400 + 1; // one second past expiry
+    });
     );
     );
     );
