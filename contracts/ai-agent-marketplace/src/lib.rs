@@ -1603,6 +1603,36 @@ impl AiAgentMarketplace {
 
     // ========== Helper Functions ==========
 
+
+    /// Slice `all` from index `offset` up to (but not including) `offset + limit`.
+    ///
+    /// Semantics:
+    /// - Returns an empty `Vec` when `offset >= all.len()` or `limit == 0`.
+    /// - Clamps the end index to the actual length so callers never need to
+    ///   guard against out-of-bounds access.
+    ///
+    /// This is the single implementation used by every paginated query function
+    /// in the contract.  Centralising the slice logic here means a bug fix or
+    /// behaviour change only needs to happen in one place.
+    ///
+    /// # Arguments
+    /// * `env`    – The current Soroban environment (needed to construct Vec).
+    /// * `all`    – The full stored index Vec to page through.
+    /// * `offset` – Zero-based starting position (inclusive).
+    /// * `limit`  – Maximum number of entries to return.
+    fn paginate(env: &Env, all: &Vec<u64>, offset: u64, limit: u64) -> Vec<u64> {
+        let total = all.len() as u64;
+        if limit == 0 || offset >= total {
+            return Vec::new(env);
+        }
+        let start = offset as u32;
+        let end_exclusive = ((offset + limit).min(total)) as u32;
+        let mut page = Vec::new(env);
+        for i in start..end_exclusive {
+            page.push_back(all.get(i).unwrap());
+        }
+        page
+    }
     fn has_config(env: &Env) -> bool {
         env.storage().instance().has(&DataKey::Config)
     }
