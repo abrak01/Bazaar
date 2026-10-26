@@ -1363,7 +1363,14 @@ impl AiAgentMarketplace {
         // Update job state
         job.status = JobStatus::Refunded;
         env.storage().instance().set(&DataKey::Job(job_id), &job);
-        todo!()
+
+        // Emit refund event
+        env.events().publish(
+            (symbol_short!("refund"),),
+            (job_id, client, escrow.amount),
+        );
+
+        Ok(())
     }
 
     /// Get agent by ID
