@@ -344,6 +344,21 @@ const ESCROW_EXPIRY_DAYS = 30;
               <AlertCircle className="h-3 w-3" /> Under Dispute Resolution
             </Badge>
           )}
+
+          {/* Reclaim Funds: visible only to the client when escrow has expired and is still funded */}
+          {canReclaimFunds && (
+            <Button
+              onClick={handleReclaimFunds}
+              variant="outline"
+              className="flex-1 sm:flex-none border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground"
+              title={Escrow expired. You may reclaim your funds.}
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Reclaim Funds
+            </Button>
+          )}
+            </Badge>
+          )}
         </div>
 
         {/* Tabs */}
