@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -12,6 +12,9 @@ import { useStellar } from '@/contexts/StellarContext';
 import { formatPrice, getSkillColor } from '@/pages/Marketplace';
 import { clsx } from 'clsx';
 import { format, formatDistanceToNow } from 'date-fns';
+
+/** Number of items fetched per page from the contract. */
+const PAGE_SIZE = 20;
 
 interface Agent {
   id: number;
@@ -70,32 +73,119 @@ export const AgentProfile: React.FC = () => {
   const agentIdNum = parseInt(agentId || '0');
 
   // Fetch agent data
-  const { data: agent, isLoading, error } = useQuery<Agent>(
-    ['agent', agentIdNum],
-    async () => {
+  const { data: agent, isLoading, error } = useQuery<Agent>({
+    queryKey: ['agent', agentIdNum],
+    queryFn: async () => {
       const client = getContractClient();
       // In real implementation: return client.getAgent(agentIdNum);
       return getMockAgent(agentIdNum);
     },
-    { enabled: !!agentIdNum }
-  );
+    enabled: !!agentIdNum,
+  });
 
-  // Fetch agent's jobs
-  const { data: jobs = [] } = useQuery<Job[]>(
-    ['agent-jobs', agentIdNum],
-    async () => {
+  // Fetch agent's jobs (paginated)
+  const {
+    data: jobsPages,
+    fetchNextPage: fetchNextJobsPage,
+    hasNextPage: hasNextJobsPage,
+    isFetchingNextPage: isFetchingNextJobsPage,
+  } = useInfiniteQuery<Job[]>({
+    queryKey: ['agent-jobs', agentIdNum],
+    queryFn: async ({ pageParam }) => {
+      const offset = (pageParam as number) ?? 0;
       const client = getContractClient();
-      return getMockAgentJobs(agentIdNum);
+      if (client) {
+        try {
+          if (agent) {
+            const ids: number[] = await client.getJobsByAgent(
+              agent.owner,
+              offset,
+              PAGE_SIZE
+            );
+            return Promise.all(ids.map((id: number) => client.getJob(id)));
+          }
+        } catch {
+          // fallback
+        }
+      }
+      const all = getMockAgentJobs(agentIdNum);
+      return all.slice(offset, offset + PAGE_SIZE);
     },
-    { enabled: !!agentIdNum }
-  );
+    initialPageParam: 0,
+    enabled: !!agentIdNum,
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.length === PAGE_SIZE
+        ? allPages.reduce((sum, p) => sum + p.length, 0)
+        : undefined,
+  });
 
-  // Fetch reviews
-  const { data: reviews = [] } = useQuery(
-    ['agent-reviews', agentIdNum],
-    async () => getMockReviews(agentIdNum),
-    { enabled: !!agentIdNum }
-  );
+  // Fetch reviews (paginated)
+  const {
+    data: reviewsPages,
+    fetchNextPage: fetchNextReviewsPage,
+    hasNextPage: hasNextReviewsPage,
+    isFetchingNextPage: isFetchingNextReviewsPage,
+  } = useInfiniteQuery({
+    queryKey: ['agent-reviews', agentIdNum],
+    queryFn: async ({ pageParam }) => {
+      const offset = (pageParam as number) ?? 0;
+      const client = getContractClient();
+      if (client && agent) {
+        try {
+          const ids: number[] = await client.getReviewsByReviewee(
+            agent.owner,
+            offset,
+            PAGE_SIZE
+          );
+          return Promise.all(ids.map((id: number) => client.getReview(id)));
+        } catch {
+          // fallback
+        }
+      }
+      const all = getMockReviews(agentIdNum);
+      return all.slice(offset, offset + PAGE_SIZE);
+    },
+    initialPageParam: 0,
+    enabled: !!agentIdNum,
+    getNextPageParam: (lastPage: any[], allPages: any[][]) =>
+      lastPage.length === PAGE_SIZE
+        ? allPages.reduce((sum, p) => sum + p.length, 0)
+        : undefined,
+  });
+
+  // Flatten paginated results
+  const jobs: Job[] = jobsPages?.pages.flat() ?? [];
+  const reviews = reviewsPages?.pages.flat() ?? [];
+
+  // Sentinel refs for infinite scroll
+  const jobsSentinelRef = useRef<HTMLDivElement>(null);
+  const reviewsSentinelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries[0].isIntersecting && hasNextJobsPage && !isFetchingNextJobsPage) {
+          fetchNextJobsPage();
+        }
+      },
+      { threshold: 0.1 }
+    );
+    if (jobsSentinelRef.current) observer.observe(jobsSentinelRef.current);
+    return () => observer.disconnect();
+  }, [hasNextJobsPage, isFetchingNextJobsPage, fetchNextJobsPage]);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries[0].isIntersecting && hasNextReviewsPage && !isFetchingNextReviewsPage) {
+          fetchNextReviewsPage();
+        }
+      },
+      { threshold: 0.1 }
+    );
+    if (reviewsSentinelRef.current) observer.observe(reviewsSentinelRef.current);
+    return () => observer.disconnect();
+  }, [hasNextReviewsPage, isFetchingNextReviewsPage, fetchNextReviewsPage]);
 
   if (isLoading) {
     return (
@@ -133,7 +223,7 @@ export const AgentProfile: React.FC = () => {
       setBidAmount('');
       setBidTimeline('');
       setBidProposal('');
-      queryClient.invalidateQueries(['agent-jobs', agentIdNum]);
+      queryClient.invalidateQueries({ queryKey: ['agent-jobs', agentIdNum] });
       alert('Bid placed successfully! (Demo mode)');
     } catch (err) {
       console.error('Bid failed:', err);
@@ -434,34 +524,48 @@ export const AgentProfile: React.FC = () => {
                   </CardContent>
                 </Card>
               ) : (
-                jobs.map(job => (
-                  <Card key={job.id} className="hover:shadow-md transition-shadow">
-                    <CardContent className="p-4">
-                      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <h4 className="font-medium">{job.title}</h4>
-                            <Badge variant={job.status === 'Completed' ? 'success' : job.status === 'InProgress' ? 'default' : 'outline'}>
-                              {job.status}
-                            </Badge>
+                <>
+                  {jobs.map(job => (
+                    <Card key={job.id} className="hover:shadow-md transition-shadow">
+                      <CardContent className="p-4">
+                        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <h4 className="font-medium">{job.title}</h4>
+                              <Badge variant={job.status === 'Completed' ? 'success' : job.status === 'InProgress' ? 'default' : 'outline'}>
+                                {job.status}
+                              </Badge>
+                            </div>
+                            <p className="text-sm text-muted-foreground line-clamp-2">{job.description}</p>
+                            <div className="flex flex-wrap gap-2 mt-2">
+                              {job.requiredSkills.map(s => (
+                                <Badge key={s} variant="outline" className={getSkillColor(s)}>{s}</Badge>
+                              ))}
+                            </div>
                           </div>
-                          <p className="text-sm text-muted-foreground line-clamp-2">{job.description}</p>
-                          <div className="flex flex-wrap gap-2 mt-2">
-                            {job.requiredSkills.map(s => (
-                              <Badge key={s} variant="outline" className={getSkillColor(s)}>{s}</Badge>
-                            ))}
+                          <div className="text-right md:text-left">
+                            <div className="text-lg font-bold text-green-500">{formatPrice(job.budget)}</div>
+                            <div className="text-sm text-muted-foreground">
+                              Completed {formatDistanceToNow(new Date(job.createdAt * 1000), { addSuffix: true })}
+                            </div>
                           </div>
                         </div>
-                        <div className="text-right md:text-left">
-                          <div className="text-lg font-bold text-green-500">{formatPrice(job.budget)}</div>
-                          <div className="text-sm text-muted-foreground">
-                            Completed {formatDistanceToNow(new Date(job.createdAt * 1000), { addSuffix: true })}
-                          </div>
-                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                  {/* Infinite-scroll sentinel */}
+                  <div ref={jobsSentinelRef} className="flex justify-center py-4" aria-hidden="true">
+                    {isFetchingNextJobsPage && (
+                      <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                        Loading more jobs…
                       </div>
-                    </CardContent>
-                  </Card>
-                ))
+                    )}
+                    {!hasNextJobsPage && jobs.length > 0 && (
+                      <p className="text-sm text-muted-foreground">All jobs loaded</p>
+                    )}
+                  </div>
+                </>
               )}
             </div>
           )}
@@ -477,35 +581,49 @@ export const AgentProfile: React.FC = () => {
                   </CardContent>
                 </Card>
               ) : (
-                reviews.map((review: any, i) => (
-                  <Card key={i}>
-                    <CardContent className="p-4">
-                      <div className="flex items-start gap-4">
-                        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-medium">
-                          {review.client?.charAt(0) || 'C'}
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="font-medium">{review.client?.slice(0, 8)}...</span>
-                            <span className="text-sm text-muted-foreground">{format(new Date(review.createdAt * 1000), 'MMM d, yyyy')}</span>
+                <>
+                  {reviews.map((review: any, i) => (
+                    <Card key={i}>
+                      <CardContent className="p-4">
+                        <div className="flex items-start gap-4">
+                          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-medium">
+                            {review.client?.charAt(0) || 'C'}
                           </div>
-                          <div className="flex items-center gap-1 mb-2">
-                            {[...Array(5)].map((_, i) => (
-                              <Star
-                                key={i}
-                                className={clsx(
-                                  'h-4 w-4',
-                                  i < review.rating ? 'fill-yellow-400 text-yellow-400' : 'text-muted-foreground'
-                                )}
-                              />
-                            ))}
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-medium">{review.client?.slice(0, 8)}...</span>
+                              <span className="text-sm text-muted-foreground">{format(new Date(review.createdAt * 1000), 'MMM d, yyyy')}</span>
+                            </div>
+                            <div className="flex items-center gap-1 mb-2">
+                              {[...Array(5)].map((_, i) => (
+                                <Star
+                                  key={i}
+                                  className={clsx(
+                                    'h-4 w-4',
+                                    i < review.rating ? 'fill-yellow-400 text-yellow-400' : 'text-muted-foreground'
+                                  )}
+                                />
+                              ))}
+                            </div>
+                            <p className="text-muted-foreground">{review.comment}</p>
                           </div>
-                          <p className="text-muted-foreground">{review.comment}</p>
                         </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                  {/* Infinite-scroll sentinel */}
+                  <div ref={reviewsSentinelRef} className="flex justify-center py-4" aria-hidden="true">
+                    {isFetchingNextReviewsPage && (
+                      <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                        Loading more reviews…
                       </div>
-                    </CardContent>
-                  </Card>
-                ))
+                    )}
+                    {!hasNextReviewsPage && reviews.length > 0 && (
+                      <p className="text-sm text-muted-foreground">All reviews loaded</p>
+                    )}
+                  </div>
+                </>
               )}
             </div>
           )}
