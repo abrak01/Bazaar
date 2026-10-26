@@ -592,6 +592,9 @@ fn test_set_paused_and_circuit_breaker() {
     // Job and escrow should now be in Refunded state
     let job = marketplace.get_job(&job_id);
     assert_eq!(job.status, JobStatus::Refunded);
+
+    // Client gets back the bid amount (platform fee was already paid at accept_bid time)
+    assert_eq!(usdc_client.balance(&client_addr), 80_000_000);
     });
     );
     );
