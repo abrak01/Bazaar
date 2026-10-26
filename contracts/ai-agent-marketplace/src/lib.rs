@@ -1346,6 +1346,14 @@ impl AiAgentMarketplace {
         if env.ledger().timestamp() <= expiry_time {
             return Err(Error::EscrowExpired);
         }
+
+        // Transfer the escrowed amount back to the client
+        let usdc_client = TokenClient::new(&env, &config.usdc_token);
+        usdc_client.transfer(
+            &env.current_contract_address(),
+            &client,
+            &escrow.amount,
+        );
         todo!()
     }
 
