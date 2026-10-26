@@ -145,6 +145,9 @@ const ESCROW_EXPIRY_DAYS = 30;
 
   /**
    * Reclaim escrow funds after the expiry window has passed.
+   *
+   * Maps to the Soroban contract function:
+   *   pub fn reclaim_expired_escrow(env, client, job_id) -> Result<(), Error>
    * Calls reclaim_expired_escrow(env, client, job_id) on the contract.
    */
   const handleReclaimFunds = async () => {
