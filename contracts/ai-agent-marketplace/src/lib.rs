@@ -1359,6 +1359,10 @@ impl AiAgentMarketplace {
         escrow.status = EscrowStatus::Refunded;
         escrow.released_at = Some(env.ledger().timestamp());
         env.storage().instance().set(&DataKey::Escrow(escrow_id), &escrow);
+
+        // Update job state
+        job.status = JobStatus::Refunded;
+        env.storage().instance().set(&DataKey::Job(job_id), &job);
         todo!()
     }
 
