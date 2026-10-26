@@ -559,6 +559,12 @@ const ESCROW_EXPIRY_DAYS = 30;
 )}
                       </span>
                     </div>
+                  {canReclaimFunds && (
+                    <Button variant="outline" size="sm" className="w-full mt-1 border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground" onClick={handleReclaimFunds}>
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Reclaim Funds
+                    </Button>
+                  )}
                   )}
                         </Badge>
                       </div>
