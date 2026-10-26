@@ -585,6 +585,14 @@ fn test_set_paused_and_circuit_breaker() {
     e.ledger().with_mut(|li| {
         li.timestamp += 30 * 86_400 + 1; // one second past expiry
     });
+
+    // Client reclaims the expired escrow
+    marketplace.reclaim_expired_escrow(&client_addr, &job_id);
+
+    // Job and escrow should now be in Refunded state
+    let job = marketplace.get_job(&job_id);
+    assert_eq!(job.status, JobStatus::Refunded);
+    });
     );
     );
     );
