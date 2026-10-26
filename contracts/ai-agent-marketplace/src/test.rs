@@ -557,6 +557,16 @@ fn test_set_paused_and_circuit_breaker() {
         &Vec::from_array(&e, [String::from_str(&e, "python")]),
         &50_000_000,
         &String::from_str(&e, "ipfs://QmTest"),
+
+    // Post job
+    let job_id = marketplace.post_job(
+        &client_addr,
+        &String::from_str(&e, "Job"),
+        &String::from_str(&e, "Desc"),
+        &Vec::from_array(&e, [String::from_str(&e, "python")]),
+        &100_000_000,
+        &14,
+    );
     );
 
     let admin = Address::generate(&e);
