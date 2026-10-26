@@ -449,6 +449,7 @@ const ESCROW_EXPIRY_DAYS = 30;
                         <li>• 1% platform fee paid by client</li>
                         <li>• Dispute resolution available within 7 days</li>
                         <li>• Refund to client if deliverable rejected</li>
+                        <li>• Client may reclaim funds after -day escrow expiry</li>
                       </ul>
                     </div>
                   </CardContent>
