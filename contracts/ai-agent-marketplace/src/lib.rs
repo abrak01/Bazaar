@@ -1334,6 +1334,11 @@ impl AiAgentMarketplace {
             .get(&DataKey::EscrowByJob(job_id))
             .ok_or(Error::EscrowNotFound)?;
         let mut escrow = Self::get_escrow(&env, escrow_id)?;
+
+        // Escrow must still be in Funded state
+        if escrow.status != EscrowStatus::Funded {
+            return Err(Error::EscrowNotFunded);
+        }
         todo!()
     }
 
