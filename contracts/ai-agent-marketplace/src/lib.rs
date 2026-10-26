@@ -1320,6 +1320,14 @@ impl AiAgentMarketplace {
     ) -> Result<(), Error> {
         client.require_auth();
         Self::ensure_not_paused(&env)?;
+
+        let config = Self::get_config(&env)?;
+        let mut job = Self::get_job(&env, job_id)?;
+
+        // Only the job's client may reclaim
+        if job.client != client {
+            return Err(Error::Unauthorized);
+        }
         todo!()
     }
 
