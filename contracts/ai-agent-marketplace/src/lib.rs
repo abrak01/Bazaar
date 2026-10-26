@@ -1302,6 +1302,17 @@ impl AiAgentMarketplace {
     /// USDC would otherwise be locked forever.  This function allows the client
     /// to reclaim the escrowed amount once `config.escrow_expiry_days` have
     /// elapsed since the escrow was created.
+    ///
+    /// Preconditions:
+    ///   - Caller must be the job's client.
+    ///   - Escrow status must be `Funded` (not already released/refunded/disputed).
+    ///   - `now > escrow.created_at + (config.escrow_expiry_days * 86_400)`.
+    ///
+    /// Effects:
+    ///   - Transfers `escrow.amount` back to the client.
+    ///   - Sets `escrow.status = EscrowStatus::Refunded`.
+    ///   - Sets `job.status    = JobStatus::Refunded`.
+    ///   - Emits a `refund` event.
     /// Get agent by ID
     pub fn get_agent(env: Env, agent_id: u64) -> Result<Agent, Error> {
         Self::get_agent(&env, agent_id)
