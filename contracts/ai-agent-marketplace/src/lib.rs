@@ -348,6 +348,7 @@ impl AiAgentMarketplace {
         Ok(())
     }
 
+
     /// Admin function to pause or unpause contract operations
     pub fn set_paused(env: Env, admin: Address, paused: bool) -> Result<(), Error> {
         admin.require_auth();
