@@ -574,6 +574,12 @@ fn test_set_paused_and_circuit_breaker() {
         &80_000_000,
         &7,
         &String::from_str(&e, "Proposal"),
+
+    // Accept bid -- funds escrow (escrow.created_at = current ledger timestamp)
+    marketplace.accept_bid(&client_addr, &job_id, &bid_id);
+
+    let job = marketplace.get_job(&job_id);
+    assert_eq!(job.status, JobStatus::InProgress);
     );
     );
     );
