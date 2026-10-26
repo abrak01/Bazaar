@@ -539,6 +539,13 @@ fn test_set_paused_and_circuit_breaker() {
     e.mock_all_auths();
 
     let admin = Address::generate(&e);
+    let client_addr = Address::generate(&e);
+    let agent_owner = Address::generate(&e);
+    let usdc = create_token_contract(&e);
+    let marketplace = create_marketplace_contract(&e, &admin, &usdc.address());
+    let usdc_client = TokenClient::new(&e, &usdc.address());
+
+    let admin = Address::generate(&e);
     let usdc = create_token_contract(&e);
     let marketplace = create_marketplace_contract(&e, &admin, &usdc.address());
 
