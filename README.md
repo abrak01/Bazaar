@@ -667,6 +667,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 </div>
 ## Escrow Expiry & Fund Recovery
+<!-- feature implemented in v1.1 -->
 
 If an agent accepts a job but never submits a deliverable, the client's
 USDC would be locked in escrow indefinitely. The contract enforces a
