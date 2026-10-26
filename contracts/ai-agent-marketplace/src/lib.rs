@@ -7,24 +7,6 @@
 // - Reputation and review system
 // - Dispute resolution
 
-// PAGINATION REFACTOR NOTE (commit 1/50)
-// -------------------------------------------------------------------------
-// Problem identified: query functions like get_jobs_by_client, get_bids_by_job,
-// get_reviews_by_reviewee, get_agents_by_skill, etc. return the entire stored
-// Vec<u64> on every call.  On Soroban the RPC response payload is limited;
-// once a marketplace accumulates hundreds of entries these calls will exceed
-// the XDR serialisation budget, causing RPC timeouts or hard failures.
-//
-// Root cause: no pagination layer exists between the contract storage and the
-// public query API.  Every caller receives ALL IDs regardless of how many
-// there are, making the response size O(n) with no upper bound.
-//
-// Proposed fix (to be implemented in subsequent commits):
-//   – Add `offset: u64` and `limit: u64` parameters to every bulk-query fn.
-//   – Implement a shared `paginate()` helper that slices a Vec<u64> safely.
-//   – Return an empty Vec when offset >= total (out-of-bounds) or limit == 0.
-//   – Update frontend useQuery hooks to useInfiniteQuery with fetchNextPage.
-// -------------------------------------------------------------------------
 #![no_std]
 use soroban_sdk::{
     auth::Context,
@@ -291,18 +273,6 @@ pub enum Error {
     ContractPaused = 51,
 }
 
-
-// --- Pagination constants ----------------------------------------------------
-// Callers SHOULD pass limit <= RECOMMENDED_PAGE_LIMIT to stay comfortably
-// within Soroban's XDR serialisation budget.  The contract itself does NOT
-// enforce this cap; it is a client-side convention documented here so all
-// integrators align on the same safe ceiling.
-//
-// Derivation: Soroban ledger entry size limit is ~64 KB after XDR encoding.
-// A Vec<u64> of 100 entries ˜ 800 bytes of payload; staying at = 100 per
-// page leaves plenty of headroom for envelope overhead and future struct growth.
-// const RECOMMENDED_PAGE_LIMIT: u64 = 100;
-// ----------------------------------------------------------------------------
 #[contract]
 pub struct AiAgentMarketplace;
 
@@ -1438,46 +1408,105 @@ impl AiAgentMarketplace {
         Self::get_review(&env, review_id)
     }
 
-    /// Get jobs by client
-    pub fn get_jobs_by_client(env: Env, client: Address) -> Vec<u64> {
-        env.storage().instance()
+    /// Get jobs by client (paginated).
+    ///
+    /// Returns a slice of the client's job-ID list starting at `offset` with
+    /// at most `limit` entries.  Returns an empty Vec when `offset` is beyond
+    /// the end of the stored list or when `limit` is 0.
+    ///
+    /// Clients should walk pages by incrementing `offset` by `limit` until the
+    /// returned Vec has fewer elements than `limit` (indicating the final page).
+    pub fn get_jobs_by_client(
+        env: Env,
+        client: Address,
+        offset: u64,
+        limit: u64,
+    ) -> Vec<u64> {
+        let all: Vec<u64> = env.storage().instance()
             .get(&DataKey::JobsByClient(client))
-            .unwrap_or(Vec::new(&env))
+            .unwrap_or(Vec::new(&env));
+        Self::paginate(&env, &all, offset, limit)
     }
 
-    /// Get jobs by agent
-    pub fn get_jobs_by_agent(env: Env, agent: Address) -> Vec<u64> {
-        env.storage().instance()
+    /// Get jobs by agent (paginated).
+    ///
+    /// Returns a slice of the agent's job-ID list starting at `offset` with
+    /// at most `limit` entries.  Returns an empty Vec when `offset` is out of
+    /// bounds or `limit` is 0.
+    pub fn get_jobs_by_agent(
+        env: Env,
+        agent: Address,
+        offset: u64,
+        limit: u64,
+    ) -> Vec<u64> {
+        let all: Vec<u64> = env.storage().instance()
             .get(&DataKey::JobsByAgent(agent))
-            .unwrap_or(Vec::new(&env))
+            .unwrap_or(Vec::new(&env));
+        Self::paginate(&env, &all, offset, limit)
     }
 
-    /// Get bids by job
-    pub fn get_bids_by_job(env: Env, job_id: u64) -> Vec<u64> {
-        env.storage().instance()
+    /// Get bids by job (paginated).
+    ///
+    /// Returns a slice of bid IDs for the given job starting at `offset` with
+    /// at most `limit` entries.
+    pub fn get_bids_by_job(
+        env: Env,
+        job_id: u64,
+        offset: u64,
+        limit: u64,
+    ) -> Vec<u64> {
+        let all: Vec<u64> = env.storage().instance()
             .get(&DataKey::BidsByJob(job_id))
-            .unwrap_or(Vec::new(&env))
+            .unwrap_or(Vec::new(&env));
+        Self::paginate(&env, &all, offset, limit)
     }
 
-    /// Get bids by agent
-    pub fn get_bids_by_agent(env: Env, agent: Address) -> Vec<u64> {
-        env.storage().instance()
+    /// Get bids by agent (paginated).
+    ///
+    /// Returns a slice of the agent's bid-ID list starting at `offset` with
+    /// at most `limit` entries.
+    pub fn get_bids_by_agent(
+        env: Env,
+        agent: Address,
+        offset: u64,
+        limit: u64,
+    ) -> Vec<u64> {
+        let all: Vec<u64> = env.storage().instance()
             .get(&DataKey::BidsByAgent(agent))
-            .unwrap_or(Vec::new(&env))
+            .unwrap_or(Vec::new(&env));
+        Self::paginate(&env, &all, offset, limit)
     }
 
-    /// Get reviews for an agent/user
-    pub fn get_reviews_by_reviewee(env: Env, reviewee: Address) -> Vec<u64> {
-        env.storage().instance()
+    /// Get reviews for an agent/user (paginated).
+    ///
+    /// Returns a slice of review IDs for the reviewee starting at `offset`
+    /// with at most `limit` entries.
+    pub fn get_reviews_by_reviewee(
+        env: Env,
+        reviewee: Address,
+        offset: u64,
+        limit: u64,
+    ) -> Vec<u64> {
+        let all: Vec<u64> = env.storage().instance()
             .get(&DataKey::ReviewsByReviewee(reviewee))
-            .unwrap_or(Vec::new(&env))
+            .unwrap_or(Vec::new(&env));
+        Self::paginate(&env, &all, offset, limit)
     }
 
-    /// Get agents by skill
-    pub fn get_agents_by_skill(env: Env, skill: String) -> Vec<u64> {
-        env.storage().instance()
+    /// Get agents by skill (paginated).
+    ///
+    /// Returns a slice of agent IDs that have the given skill starting at
+    /// `offset` with at most `limit` entries.
+    pub fn get_agents_by_skill(
+        env: Env,
+        skill: String,
+        offset: u64,
+        limit: u64,
+    ) -> Vec<u64> {
+        let all: Vec<u64> = env.storage().instance()
             .get(&DataKey::SkillAgents(skill))
-            .unwrap_or(Vec::new(&env))
+            .unwrap_or(Vec::new(&env));
+        Self::paginate(&env, &all, offset, limit)
     }
 
     /// Get platform configuration
@@ -1603,23 +1632,11 @@ impl AiAgentMarketplace {
 
     // ========== Helper Functions ==========
 
-
-    /// Slice `all` from index `offset` up to (but not including) `offset + limit`.
+    /// Slice a Vec<u64> from `offset` up to `offset + limit`.
     ///
-    /// Semantics:
-    /// - Returns an empty `Vec` when `offset >= all.len()` or `limit == 0`.
+    /// - Returns an empty Vec when `offset >= all.len()` or `limit == 0`.
     /// - Clamps the end index to the actual length so callers never need to
-    ///   guard against out-of-bounds access.
-    ///
-    /// This is the single implementation used by every paginated query function
-    /// in the contract.  Centralising the slice logic here means a bug fix or
-    /// behaviour change only needs to happen in one place.
-    ///
-    /// # Arguments
-    /// * `env`    – The current Soroban environment (needed to construct Vec).
-    /// * `all`    – The full stored index Vec to page through.
-    /// * `offset` – Zero-based starting position (inclusive).
-    /// * `limit`  – Maximum number of entries to return.
+    ///   worry about out-of-bounds accesses.
     fn paginate(env: &Env, all: &Vec<u64>, offset: u64, limit: u64) -> Vec<u64> {
         let total = all.len() as u64;
         if limit == 0 || offset >= total {
@@ -1633,6 +1650,7 @@ impl AiAgentMarketplace {
         }
         page
     }
+
     fn has_config(env: &Env) -> bool {
         env.storage().instance().has(&DataKey::Config)
     }
