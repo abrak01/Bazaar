@@ -58,6 +58,10 @@ interface Agent {
 }
 
 export const JobDetail: React.FC = () => {
+/** Number of days after escrow creation beyond which the client may reclaim funds.
+ *  Must match the `escrow_expiry_days` value set during contract initialisation. */
+const ESCROW_EXPIRY_DAYS = 30;
+
   const { jobId } = useParams<{ jobId: string }>();
   const navigate = useNavigate();
   const { publicKey, isConnected } = useWallet();
