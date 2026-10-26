@@ -1354,6 +1354,11 @@ impl AiAgentMarketplace {
             &client,
             &escrow.amount,
         );
+
+        // Update escrow state
+        escrow.status = EscrowStatus::Refunded;
+        escrow.released_at = Some(env.ledger().timestamp());
+        env.storage().instance().set(&DataKey::Escrow(escrow_id), &escrow);
         todo!()
     }
 
