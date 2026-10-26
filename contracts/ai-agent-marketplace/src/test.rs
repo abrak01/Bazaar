@@ -530,6 +530,9 @@ fn test_leave_review() {
 }
 
 #[test]
+
+#[test]
+fn test_reclaim_expired_escrow_not_expired() {
 #[test]
 fn test_reclaim_expired_escrow() {
     let e = Env::default();
