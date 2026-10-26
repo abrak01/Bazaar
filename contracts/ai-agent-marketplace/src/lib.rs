@@ -1318,6 +1318,8 @@ impl AiAgentMarketplace {
         client: Address,
         job_id: u64,
     ) -> Result<(), Error> {
+        client.require_auth();
+        Self::ensure_not_paused(&env)?;
         todo!()
     }
 
