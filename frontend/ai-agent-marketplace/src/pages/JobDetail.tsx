@@ -29,6 +29,8 @@ interface Job {
   assignedAgent: string | null;
   bids: Bid[];
   escrowAmount: number;
+  /** Unix timestamp (seconds) when the escrow was created — used to compute expiry. */
+  escrowCreatedAt: number | null;
   createdAt: number;
   completedAt: number | null;
   deliverableHash: string | null;
