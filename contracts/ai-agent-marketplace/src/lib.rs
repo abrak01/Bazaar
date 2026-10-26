@@ -7,6 +7,24 @@
 // - Reputation and review system
 // - Dispute resolution
 
+// PAGINATION REFACTOR NOTE (commit 1/50)
+// -------------------------------------------------------------------------
+// Problem identified: query functions like get_jobs_by_client, get_bids_by_job,
+// get_reviews_by_reviewee, get_agents_by_skill, etc. return the entire stored
+// Vec<u64> on every call.  On Soroban the RPC response payload is limited;
+// once a marketplace accumulates hundreds of entries these calls will exceed
+// the XDR serialisation budget, causing RPC timeouts or hard failures.
+//
+// Root cause: no pagination layer exists between the contract storage and the
+// public query API.  Every caller receives ALL IDs regardless of how many
+// there are, making the response size O(n) with no upper bound.
+//
+// Proposed fix (to be implemented in subsequent commits):
+//   – Add `offset: u64` and `limit: u64` parameters to every bulk-query fn.
+//   – Implement a shared `paginate()` helper that slices a Vec<u64> safely.
+//   – Return an empty Vec when offset >= total (out-of-bounds) or limit == 0.
+//   – Update frontend useQuery hooks to useInfiniteQuery with fetchNextPage.
+// -------------------------------------------------------------------------
 #![no_std]
 use soroban_sdk::{
     auth::Context,
