@@ -348,6 +348,7 @@ impl AiAgentMarketplace {
         Ok(())
     }
 
+
     /// Admin function to pause or unpause contract operations
     pub fn set_paused(env: Env, admin: Address, paused: bool) -> Result<(), Error> {
         admin.require_auth();
@@ -845,6 +846,8 @@ impl AiAgentMarketplace {
         };
 
         env.storage().instance().set(&DataKey::Escrow(escrow_id), &escrow);
+        // EscrowByJob maps job_id -> escrow_id, created atomically in accept_bid.
+        // This guarantees the lookup succeeds for any job that has ever had a funded escrow.
         env.storage().instance().set(&DataKey::EscrowByJob(job_id), &escrow_id);
 
         // Update job
@@ -1290,6 +1293,86 @@ impl AiAgentMarketplace {
         env.events().publish(
             (symbol_short!("review"),),
             (review_id, job_id, reviewer, reviewee, rating),
+        );
+
+        Ok(())
+    }
+
+
+    /// Reclaim escrow funds after expiry (client only)
+    ///
+    /// If an agent accepts a job but never submits a deliverable, the client's
+    /// USDC would otherwise be locked forever.  This function allows the client
+    /// to reclaim the escrowed amount once `config.escrow_expiry_days` have
+    /// elapsed since the escrow was created.
+    ///
+    /// Preconditions:
+    ///   - Caller must be the job's client.
+    ///   - Escrow status must be `Funded` (not already released/refunded/disputed).
+    ///   - `now > escrow.created_at + (config.escrow_expiry_days * 86_400)`.
+    ///
+    /// Effects:
+    ///   - Transfers `escrow.amount` back to the client.
+    ///   - Sets `escrow.status = EscrowStatus::Refunded`.
+    ///   - Sets `job.status    = JobStatus::Refunded`.
+    ///   - Emits a `refund` event.
+    pub fn reclaim_expired_escrow(
+        env: Env,
+        client: Address,
+        job_id: u64,
+    ) -> Result<(), Error> {
+        client.require_auth();
+        Self::ensure_not_paused(&env)?;
+
+        let config = Self::get_config(&env)?;
+        let mut job = Self::get_job(&env, job_id)?;
+
+        // Only the job's client may reclaim
+        if job.client != client {
+            return Err(Error::Unauthorized);
+        }
+
+        // Look up the escrow
+        let escrow_id: u64 = env.storage().instance()
+            .get(&DataKey::EscrowByJob(job_id))
+            .ok_or(Error::EscrowNotFound)?;
+        let mut escrow = Self::get_escrow(&env, escrow_id)?;
+
+        // Escrow must still be in Funded state
+        if escrow.status != EscrowStatus::Funded {
+            return Err(Error::EscrowNotFunded);
+        }
+
+        // Verify the expiry window has passed
+        let expiry_seconds = config.escrow_expiry_days * 86_400;
+        let expiry_time = escrow.created_at + expiry_seconds;
+        if env.ledger().timestamp() <= expiry_time {
+        // Note: EscrowExpired is repurposed here to mean 'not yet expired / too early to reclaim'.
+        // A future refactor may introduce a dedicated EscrowNotExpired error variant.
+            return Err(Error::EscrowExpired);
+        }
+
+        // Transfer the escrowed amount back to the client
+        let usdc_client = TokenClient::new(&env, &config.usdc_token);
+        usdc_client.transfer(
+            &env.current_contract_address(),
+            &client,
+            &escrow.amount,
+        );
+
+        // Update escrow state
+        escrow.status = EscrowStatus::Refunded;
+        escrow.released_at = Some(env.ledger().timestamp());
+        env.storage().instance().set(&DataKey::Escrow(escrow_id), &escrow);
+
+        // Update job state
+        job.status = JobStatus::Refunded;
+        env.storage().instance().set(&DataKey::Job(job_id), &job);
+
+        // Emit refund event
+        env.events().publish(
+            (symbol_short!("refund"),),
+            (job_id, client, escrow.amount),
         );
 
         Ok(())

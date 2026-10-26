@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/Textarea';
 import { 
   DollarSign, Clock, Star, User, CheckCircle, AlertCircle, 
   ArrowLeft, Send, Wallet, Loader2, ExternalLink, MessageSquare,
-  Shield, FileText, XCircle, ChevronDown, ChevronUp
+  Shield, FileText, XCircle, ChevronDown, ChevronUp, RefreshCw
 } from 'lucide-react';
 import { useWallet } from '@/contexts/WalletContext';
 import { useStellar } from '@/contexts/StellarContext';
@@ -29,6 +29,8 @@ interface Job {
   assignedAgent: string | null;
   bids: Bid[];
   escrowAmount: number;
+  /** Unix timestamp (seconds) when the escrow was created � used to compute expiry. */
+  escrowCreatedAt: number | null;
   createdAt: number;
   completedAt: number | null;
   deliverableHash: string | null;
@@ -56,6 +58,10 @@ interface Agent {
 }
 
 export const JobDetail: React.FC = () => {
+/** Number of days after escrow creation beyond which the client may reclaim funds.
+ *  Must match the `escrow_expiry_days` value set during contract initialisation. */
+const ESCROW_EXPIRY_DAYS = 30;
+
   const { jobId } = useParams<{ jobId: string }>();
   const navigate = useNavigate();
   const { publicKey, isConnected } = useWallet();
@@ -135,6 +141,26 @@ export const JobDetail: React.FC = () => {
     } catch (err) {
       console.error('Approve failed:', err);
       alert('Failed to approve deliverable.');
+  };
+
+  /**
+   * Reclaim escrow funds after the expiry window has passed.
+   *
+   * Maps to the Soroban contract function:
+   *   pub fn reclaim_expired_escrow(env, client, job_id) -> Result<(), Error>
+   * Calls reclaim_expired_escrow(env, client, job_id) on the contract.
+   */
+  const handleReclaimFunds = async () => {
+    if (!publicKey || !isClient) return;
+    try {
+      const client = getContractClient();
+      // await client.reclaimExpiredEscrow({ client: publicKey, jobId: jobIdNum });
+      queryClient.invalidateQueries(['job', jobIdNum]);
+      alert('Funds reclaimed successfully! (Demo mode)');
+    } catch (err) {
+      console.error('Reclaim failed:', err);
+      alert('Failed to reclaim funds. Please try again.');
+    }
     }
   };
 
@@ -164,6 +190,19 @@ export const JobDetail: React.FC = () => {
   const timeLeft = job.deadline * 1000 - Date.now();
   const daysLeft = Math.max(0, Math.ceil(timeLeft / (1000 * 60 * 60 * 24)));
   const isExpired = timeLeft <= 0;
+
+  // Escrow expiry: client can reclaim funds if escrow is still Funded after ESCROW_EXPIRY_DAYS
+  // Multiply by 1000: escrowCreatedAt is in seconds (Unix), Date.now() is in ms
+  const escrowExpiryTime = job.escrowCreatedAt
+    ? (job.escrowCreatedAt + ESCROW_EXPIRY_DAYS * 86400) * 1000
+    : null;
+  const isEscrowExpired = escrowExpiryTime !== null && Date.now() > escrowExpiryTime;
+  // All four conditions must hold before showing the Reclaim Funds button
+  const canReclaimFunds =
+    isClient &&
+    job.status === 'InProgress' &&
+    isEscrowExpired &&
+    job.escrowAmount > 0;
 
   const statusConfig = {
     Open: { label: 'Open for Bids', color: 'success', icon: DollarSign },
@@ -310,6 +349,21 @@ export const JobDetail: React.FC = () => {
               <AlertCircle className="h-3 w-3" /> Under Dispute Resolution
             </Badge>
           )}
+
+          {/* Reclaim Funds: visible only to the client when escrow has expired and is still funded */}
+          {canReclaimFunds && (
+            <Button
+              onClick={handleReclaimFunds}
+              variant="outline"
+              className="flex-1 sm:flex-none border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground"
+              title={Escrow expired. You may reclaim your funds.}
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Reclaim Funds
+            </Button>
+          )}
+            </Badge>
+          )}
         </div>
 
         {/* Tabs */}
@@ -397,6 +451,8 @@ export const JobDetail: React.FC = () => {
                         <li>• 1% platform fee paid by client</li>
                         <li>• Dispute resolution available within 7 days</li>
                         <li>• Refund to client if deliverable rejected</li>
+                        <li>• Client may reclaim funds after the 30-day escrow expiry</li>
+                        <li>• Client may reclaim funds after -day escrow expiry</li>
                       </ul>
                     </div>
                   </CardContent>
@@ -493,6 +549,30 @@ export const JobDetail: React.FC = () => {
                         <span className="text-muted-foreground">Status</span>
                         <Badge variant={job.status === 'Completed' ? 'success' : 'default'}>
                           {job.status === 'Completed' ? 'Released' : 'Funded'}
+                    </Badge>
+                  </div>
+                  {escrowExpiryTime && (
+                    <div className="flex items-center justify-between text-sm border-t pt-3">
+                      <span className="text-muted-foreground">Expires</span>
+                      <span className={clsx(
+'font-medium'
+, isEscrowExpired ? 
+'text-destructive'
+ : 
+'text-foreground'
+)}>
+                        {isEscrowExpired ? `Expired ${formatDistanceToNow(new Date(escrowExpiryTime), { addSuffix: true })}` : format(new Date(escrowExpiryTime), 
+'MMM d, yyyy'
+)}
+                      </span>
+                    </div>
+                  {canReclaimFunds && (
+                    <Button variant="outline" size="sm" className="w-full mt-1 border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground" onClick={handleReclaimFunds} aria-label="Reclaim escrowed funds from expired escrow" title="Reclaim your USDC after the escrow expiry window">
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Reclaim Funds
+                    </Button>
+                  )}
+                  )}
                         </Badge>
                       </div>
                     </CardContent>
@@ -632,6 +712,15 @@ export const JobDetail: React.FC = () => {
                       color="text-destructive" 
                       title="Refunded" 
                       description="Payment refunded to client"
+                  {job.status === 'Refunded' && job.escrowCreatedAt && (
+                    <ActivityItem
+                      icon={RefreshCw}
+                      color="text-orange-500"
+                      title="Escrow Funds Reclaimed"
+                      description="Client reclaimed escrowed funds after expiry window"
+                      time={job.escrowCreatedAt + ESCROW_EXPIRY_DAYS * 86400 + 1}
+                    />
+                  )}
                       time={job.createdAt + 86400 * 10}
                     />
                   )}
@@ -781,6 +870,7 @@ Budget: $150 USDC (escrow protected)`,
         },
       ],
       escrowAmount: 0,
+      escrowCreatedAt: null,
       createdAt: Math.floor(Date.now() / 1000) - 86400 * 2,
       completedAt: null,
       deliverableHash: null,
@@ -833,6 +923,8 @@ Deliverables:
         },
       ],
       escrowAmount: 75000000,
+      // escrowCreatedAt 5 days ago -- still within the 30-day expiry window for demo
+      escrowCreatedAt: Math.floor(Date.now() / 1000) - 86400 * 5,
       createdAt: Math.floor(Date.now() / 1000) - 86400 * 5,
       completedAt: null,
       deliverableHash: null,

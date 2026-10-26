@@ -546,3 +546,121 @@ fn test_set_paused_and_circuit_breaker() {
     marketplace.set_paused(&admin, &false);
     assert!(!marketplace.is_paused());
 }
+
+#[test]
+fn test_reclaim_expired_escrow() {
+    let e = Env::default();
+    e.mock_all_auths();
+
+    let admin = Address::generate(&e);
+    let client_addr = Address::generate(&e);
+    let agent_owner = Address::generate(&e);
+    let usdc = create_token_contract(&e);
+    let marketplace = create_marketplace_contract(&e, &admin, &usdc.address());
+    let usdc_client = TokenClient::new(&e, &usdc.address());
+
+    // Mint USDC to the client
+    let admin_client = TokenAdminClient::new(&e, &usdc.address());
+    admin_client.mint(&client_addr, &100_000_000);
+
+    // Register agent
+    let agent_id = marketplace.register_agent(
+        &agent_owner,
+        &String::from_str(&e, "Agent"),
+        &String::from_str(&e, "Desc"),
+        &Vec::from_array(&e, [String::from_str(&e, "python")]),
+        &50_000_000,
+        &String::from_str(&e, "ipfs://QmTest"),
+    );
+
+    // Post job
+    let job_id = marketplace.post_job(
+        &client_addr,
+        &String::from_str(&e, "Job"),
+        &String::from_str(&e, "Desc"),
+        &Vec::from_array(&e, [String::from_str(&e, "python")]),
+        &100_000_000,
+        &14,
+    );
+
+    // Place bid
+    let bid_id = marketplace.place_bid(
+        &agent_owner,
+        &job_id,
+        &80_000_000,
+        &7,
+        &String::from_str(&e, "Proposal"),
+    );
+
+    // Accept bid -> funds escrow (escrow.created_at = current ledger timestamp)
+    marketplace.accept_bid(&client_addr, &job_id, &bid_id);
+
+    let job = marketplace.get_job(&job_id);
+    assert_eq!(job.status, JobStatus::InProgress);
+
+    // Advance the ledger past the 30-day expiry window
+    e.ledger().with_mut(|li| {
+        li.timestamp += 30 * 86_400 + 1; // one second past expiry
+    });
+
+    // Client reclaims the expired escrow
+    marketplace.reclaim_expired_escrow(&client_addr, &job_id);
+
+    // Job and escrow should now be in Refunded state
+    let job = marketplace.get_job(&job_id);
+    assert_eq!(job.status, JobStatus::Refunded);
+
+    // Client gets back the bid amount (platform fee was already paid at accept_bid time)
+    assert_eq!(usdc_client.balance(&client_addr), 80_000_000);
+}
+
+#[test]
+fn test_reclaim_expired_escrow_not_expired() {
+    let e = Env::default();
+    e.mock_all_auths();
+
+    let admin = Address::generate(&e);
+    let client_addr = Address::generate(&e);
+    let agent_owner = Address::generate(&e);
+    let usdc = create_token_contract(&e);
+    let marketplace = create_marketplace_contract(&e, &admin, &usdc.address());
+
+    // Mint USDC
+    let admin_client = TokenAdminClient::new(&e, &usdc.address());
+    admin_client.mint(&client_addr, &100_000_000);
+
+    // Register agent, post job, place & accept bid
+    marketplace.register_agent(
+        &agent_owner,
+        &String::from_str(&e, "Agent"),
+        &String::from_str(&e, "Desc"),
+        &Vec::from_array(&e, [String::from_str(&e, "python")]),
+        &50_000_000,
+        &String::from_str(&e, "ipfs://QmTest"),
+    );
+
+    let job_id = marketplace.post_job(
+        &client_addr,
+        &String::from_str(&e, "Job"),
+        &String::from_str(&e, "Desc"),
+        &Vec::from_array(&e, [String::from_str(&e, "python")]),
+        &100_000_000,
+        &14,
+    );
+
+    let bid_id = marketplace.place_bid(
+        &agent_owner,
+        &job_id,
+        &80_000_000,
+        &7,
+        &String::from_str(&e, "Proposal"),
+    );
+
+    marketplace.accept_bid(&client_addr, &job_id, &bid_id);
+
+    // Do NOT advance time -- escrow is still within the expiry window
+    // Attempting to reclaim should return EscrowExpired error
+    let result = marketplace.try_reclaim_expired_escrow(&client_addr, &job_id);
+    assert!(result.is_err());
+}
+
