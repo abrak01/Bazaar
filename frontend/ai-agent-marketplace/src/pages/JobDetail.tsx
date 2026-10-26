@@ -29,7 +29,7 @@ interface Job {
   assignedAgent: string | null;
   bids: Bid[];
   escrowAmount: number;
-  /** Unix timestamp (seconds) when the escrow was created — used to compute expiry. */
+  /** Unix timestamp (seconds) when the escrow was created ï¿½ used to compute expiry. */
   escrowCreatedAt: number | null;
   createdAt: number;
   completedAt: number | null;
@@ -75,14 +75,14 @@ const ESCROW_EXPIRY_DAYS = 30;
 
   const jobIdNum = parseInt(jobId || '0');
 
-  const { data: job, isLoading, error } = useQuery<Job>(
-    ['job', jobIdNum],
-    async () => {
+  const { data: job, isLoading, error } = useQuery<Job>({
+    queryKey: ['job', jobIdNum],
+    queryFn: async () => {
       const client = getContractClient();
       return getMockJob(jobIdNum);
     },
-    { enabled: !!jobIdNum }
-  );
+    enabled: !!jobIdNum,
+  });
 
   const isClient = publicKey === job?.client;
   const isAssignedAgent = publicKey === job?.assignedAgent;
@@ -97,7 +97,7 @@ const ESCROW_EXPIRY_DAYS = 30;
       setBidAmount('');
       setBidTimeline('');
       setBidProposal('');
-      queryClient.invalidateQueries(['job', jobIdNum]);
+      queryClient.invalidateQueries({ queryKey: ['job', jobIdNum] });
       alert('Bid placed successfully! (Demo mode)');
     } catch (err) {
       console.error('Bid failed:', err);
@@ -110,7 +110,7 @@ const ESCROW_EXPIRY_DAYS = 30;
     try {
       const client = getContractClient();
       // await client.acceptBid({ client: publicKey, jobId: jobIdNum, bidId });
-      queryClient.invalidateQueries(['job', jobIdNum]);
+      queryClient.invalidateQueries({ queryKey: ['job', jobIdNum] });
       alert('Bid accepted! Escrow funded. (Demo mode)');
     } catch (err) {
       console.error('Accept bid failed:', err);
@@ -123,7 +123,7 @@ const ESCROW_EXPIRY_DAYS = 30;
     try {
       const client = getContractClient();
       // await client.submitDeliverable({ agent: publicKey, jobId: jobIdNum, deliverableHash: Buffer.from('demo') });
-      queryClient.invalidateQueries(['job', jobIdNum]);
+      queryClient.invalidateQueries({ queryKey: ['job', jobIdNum] });
       alert('Deliverable submitted! (Demo mode)');
     } catch (err) {
       console.error('Submit failed:', err);
@@ -136,7 +136,7 @@ const ESCROW_EXPIRY_DAYS = 30;
     try {
       const client = getContractClient();
       // await client.approveDeliverable({ client: publicKey, jobId: jobIdNum });
-      queryClient.invalidateQueries(['job', jobIdNum]);
+      queryClient.invalidateQueries({ queryKey: ['job', jobIdNum] });
       alert('Deliverable approved! Payment released. (Demo mode)');
     } catch (err) {
       console.error('Approve failed:', err);
@@ -155,7 +155,7 @@ const ESCROW_EXPIRY_DAYS = 30;
     try {
       const client = getContractClient();
       // await client.reclaimExpiredEscrow({ client: publicKey, jobId: jobIdNum });
-      queryClient.invalidateQueries(['job', jobIdNum]);
+      queryClient.invalidateQueries({ queryKey: ['job', jobIdNum] });
       alert('Funds reclaimed successfully! (Demo mode)');
     } catch (err) {
       console.error('Reclaim failed:', err);

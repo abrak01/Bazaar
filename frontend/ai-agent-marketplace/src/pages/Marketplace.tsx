@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -60,6 +60,9 @@ const ALL_SKILLS = [
   'trading', 'quantitative-analysis', 'risk-management', 'portfolio-optimization',
 ];
 
+/** Number of items fetched per page from the contract. */
+const PAGE_SIZE = 20;
+
 export const Marketplace: React.FC = () => {
   const { publicKey, isConnected } = useWallet();
   const { getContractClient } = useStellar();
@@ -70,40 +73,131 @@ export const Marketplace: React.FC = () => {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [activeTab, setActiveTab] = useState<'agents' | 'jobs'>('agents');
 
-  // Fetch agents
-  const { data: agents = [], isLoading: agentsLoading, error: agentsError } = useQuery<Agent[]>(
-    'agents',
-    async () => {
+  // Sentinel refs for infinite-scroll intersection observer
+  const agentsSentinelRef = useRef<HTMLDivElement>(null);
+  const jobsSentinelRef = useRef<HTMLDivElement>(null);
+
+  // ── Paginated agents query ────────────────────────────────────────────────
+  const {
+    data: agentsPages,
+    isLoading: agentsLoading,
+    error: agentsError,
+    fetchNextPage: fetchNextAgentsPage,
+    hasNextPage: hasNextAgentsPage,
+    isFetchingNextPage: isFetchingNextAgentsPage,
+  } = useInfiniteQuery<Agent[]>({
+    queryKey: ['agents', selectedSkills],
+    queryFn: async ({ pageParam }) => {
+      const offset = (pageParam as number) ?? 0;
       try {
         const client = getContractClient();
         if (client) {
-          // Attempt real contract fetch if initialized
+          if (selectedSkills.length > 0) {
+            const sets = await Promise.all(
+              selectedSkills.map((skill: string) =>
+                client.getAgentsBySkill(skill, offset, PAGE_SIZE)
+              )
+            );
+            const intersection: number[] = sets[0].filter((id: number) =>
+              sets.every((s: number[]) => s.includes(id))
+            );
+            return Promise.all(intersection.map((id: number) => client.getAgent(id)));
+          }
+          const agentCount: number = await client.getAgentCounter();
+          const ids = Array.from(
+            { length: Math.min(PAGE_SIZE, Math.max(0, agentCount - offset)) },
+            (_, i) => offset + i + 1
+          );
+          return Promise.all(ids.map((id: number) => client.getAgent(id)));
+        }
+      } catch {
+        // fallback to mock
+      }
+      const all = getMockAgents();
+      return all.slice(offset, offset + PAGE_SIZE);
+    },
+    initialPageParam: 0,
+    staleTime: 1000 * 60 * 5,
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.length === PAGE_SIZE
+        ? allPages.reduce((sum, p) => sum + p.length, 0)
+        : undefined,
+  });
+
+  // ── Paginated jobs query ──────────────────────────────────────────────────
+  const {
+    data: jobsPages,
+    isLoading: jobsLoading,
+    fetchNextPage: fetchNextJobsPage,
+    hasNextPage: hasNextJobsPage,
+    isFetchingNextPage: isFetchingNextJobsPage,
+  } = useInfiniteQuery<Job[]>({
+    queryKey: ['jobs'],
+    queryFn: async ({ pageParam }) => {
+      const offset = (pageParam as number) ?? 0;
+      try {
+        const client = getContractClient();
+        if (client) {
+          const jobCount: number = await client.getJobCounter();
+          const ids = Array.from(
+            { length: Math.min(PAGE_SIZE, Math.max(0, jobCount - offset)) },
+            (_, i) => offset + i + 1
+          );
+          return Promise.all(ids.map((id: number) => client.getJob(id)));
         }
       } catch {
         // fallback
       }
-      return getMockAgents();
+      const all = getMockJobs();
+      return all.slice(offset, offset + PAGE_SIZE);
     },
-    { staleTime: 1000 * 60 * 5 }
-  );
+    initialPageParam: 0,
+    staleTime: 1000 * 60 * 5,
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.length === PAGE_SIZE
+        ? allPages.reduce((sum, p) => sum + p.length, 0)
+        : undefined,
+  });
 
-  // Fetch jobs
-  const { data: jobs = [], isLoading: jobsLoading } = useQuery<Job[]>(
-    'jobs',
-    async () => {
-      return getMockJobs();
-    },
-    { staleTime: 1000 * 60 * 5 }
-  );
+  // Flatten pages into single arrays for rendering
+  const agents: Agent[] = agentsPages?.pages.flat() ?? [];
+  const jobs: Job[] = jobsPages?.pages.flat() ?? [];
 
-  // Fetch stats
-  const { data: stats } = useQuery<PlatformStats>(
-    'stats',
-    async () => {
+  // Fetch stats (single-page, no pagination needed)
+  const { data: stats } = useQuery<PlatformStats>({
+    queryKey: ['stats'],
+    queryFn: async () => {
       return getMockStats();
     },
-    { staleTime: 1000 * 60 * 10 }
-  );
+    staleTime: 1000 * 60 * 10,
+  });
+
+  // ── Intersection observers for infinite scroll ────────────────────────────
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries[0].isIntersecting && hasNextAgentsPage && !isFetchingNextAgentsPage) {
+          fetchNextAgentsPage();
+        }
+      },
+      { threshold: 0.1 }
+    );
+    if (agentsSentinelRef.current) observer.observe(agentsSentinelRef.current);
+    return () => observer.disconnect();
+  }, [hasNextAgentsPage, isFetchingNextAgentsPage, fetchNextAgentsPage]);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries[0].isIntersecting && hasNextJobsPage && !isFetchingNextJobsPage) {
+          fetchNextJobsPage();
+        }
+      },
+      { threshold: 0.1 }
+    );
+    if (jobsSentinelRef.current) observer.observe(jobsSentinelRef.current);
+    return () => observer.disconnect();
+  }, [hasNextJobsPage, isFetchingNextJobsPage, fetchNextJobsPage]);
 
   // Filter agents
   const filteredAgents = agents
@@ -369,19 +463,33 @@ export const Marketplace: React.FC = () => {
                 action={<Button onClick={clearFilters}>Clear Filters</Button>}
               />
             ) : (
-              viewMode === 'grid' ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                  {filteredAgents.map(agent => (
-                    <AgentCard key={agent.id} agent={agent} />
-                  ))}
+              <>
+                {viewMode === 'grid' ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    {filteredAgents.map(agent => (
+                      <AgentCard key={agent.id} agent={agent} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {filteredAgents.map(agent => (
+                      <AgentCardList key={agent.id} agent={agent} />
+                    ))}
+                  </div>
+                )}
+                {/* Infinite-scroll sentinel */}
+                <div ref={agentsSentinelRef} className="mt-8 flex justify-center" aria-hidden="true">
+                  {isFetchingNextAgentsPage && (
+                    <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                      Loading more agents…
+                    </div>
+                  )}
+                  {!hasNextAgentsPage && filteredAgents.length > 0 && (
+                    <p className="text-sm text-muted-foreground">All agents loaded</p>
+                  )}
                 </div>
-              ) : (
-                <div className="space-y-4">
-                  {filteredAgents.map(agent => (
-                    <AgentCardList key={agent.id} agent={agent} />
-                  ))}
-                </div>
-              )
+              </>
             )
           ) : (
             jobsLoading ? (
@@ -398,11 +506,25 @@ export const Marketplace: React.FC = () => {
                 action={<Button onClick={clearFilters}>Clear Filters</Button>}
               />
             ) : (
-              <div className="space-y-4">
-                {filteredJobs.map(job => (
-                  <JobCard key={job.id} job={job} />
-                ))}
-              </div>
+              <>
+                <div className="space-y-4">
+                  {filteredJobs.map(job => (
+                    <JobCard key={job.id} job={job} />
+                  ))}
+                </div>
+                {/* Infinite-scroll sentinel */}
+                <div ref={jobsSentinelRef} className="mt-8 flex justify-center" aria-hidden="true">
+                  {isFetchingNextJobsPage && (
+                    <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                      Loading more jobs…
+                    </div>
+                  )}
+                  {!hasNextJobsPage && filteredJobs.length > 0 && (
+                    <p className="text-sm text-muted-foreground">All jobs loaded</p>
+                  )}
+                </div>
+              </>
             )
           )}
         </div>

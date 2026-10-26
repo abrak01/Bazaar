@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import React, { useState, useEffect, useRef } from 'react';
+import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -15,6 +15,9 @@ import { useStellar } from '@/contexts/StellarContext';
 import { formatPrice, getSkillColor } from '@/pages/Marketplace';
 import { clsx } from 'clsx';
 import { format, formatDistanceToNow } from 'date-fns';
+
+/** Number of items fetched per page from the contract. */
+const PAGE_SIZE = 20;
 
 const statusConfig = {
   Open: { label: 'Open', color: 'success' as const, icon: DollarSign },
@@ -87,38 +90,102 @@ export const Dashboard: React.FC = () => {
     );
   }
 
-  const { data: myJobs = [], isLoading: jobsLoading } = useQuery<Job[]>(
-    ['myJobs', publicKey],
-    async () => {
+  const { data: myJobsPages, isLoading: jobsLoading, fetchNextPage: fetchNextJobsPage, hasNextPage: hasNextJobsPage, isFetchingNextPage: isFetchingNextJobsPage } = useInfiniteQuery<Job[]>({
+    queryKey: ['myJobs', publicKey],
+    queryFn: async ({ pageParam }) => {
+      const offset = (pageParam as number) ?? 0;
       const client = getContractClient();
-      return getMockMyJobs(publicKey);
-    }
-  );
+      if (client) {
+        try {
+          const ids: number[] = await client.getJobsByClient(publicKey, offset, PAGE_SIZE);
+          return Promise.all(ids.map((id: number) => client.getJob(id)));
+        } catch {
+          // fallback
+        }
+      }
+      const all = getMockMyJobs(publicKey);
+      return all.slice(offset, offset + PAGE_SIZE);
+    },
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.length === PAGE_SIZE
+        ? allPages.reduce((sum, p) => sum + p.length, 0)
+        : undefined,
+  });
 
-  const { data: myBids = [], isLoading: bidsLoading } = useQuery(
-    ['myBids', publicKey],
-    async () => {
+  const { data: myBidsPages, isLoading: bidsLoading, fetchNextPage: fetchNextBidsPage, hasNextPage: hasNextBidsPage, isFetchingNextPage: isFetchingNextBidsPage } = useInfiniteQuery({
+    queryKey: ['myBids', publicKey],
+    queryFn: async ({ pageParam }) => {
+      const offset = (pageParam as number) ?? 0;
       const client = getContractClient();
-      return getMockMyBids(publicKey);
-    }
-  );
+      if (client) {
+        try {
+          const ids: number[] = await client.getBidsByAgent(publicKey, offset, PAGE_SIZE);
+          return Promise.all(ids.map((id: number) => client.getBid(id)));
+        } catch {
+          // fallback
+        }
+      }
+      const all = getMockMyBids(publicKey);
+      return all.slice(offset, offset + PAGE_SIZE);
+    },
+    initialPageParam: 0,
+    getNextPageParam: (lastPage: any[], allPages: any[][]) =>
+      lastPage.length === PAGE_SIZE
+        ? allPages.reduce((sum, p) => sum + p.length, 0)
+        : undefined,
+  });
 
-  const { data: myAgent } = useQuery<Agent | null>(
-    ['myAgent', publicKey],
-    async () => {
+  // Flatten paginated results
+  const myJobs: Job[] = myJobsPages?.pages.flat() ?? [];
+  const myBids = myBidsPages?.pages.flat() ?? [];
+
+  // Sentinel refs for infinite scroll
+  const jobsSentinelRef = useRef<HTMLDivElement>(null);
+  const bidsSentinelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries[0].isIntersecting && hasNextJobsPage && !isFetchingNextJobsPage) {
+          fetchNextJobsPage();
+        }
+      },
+      { threshold: 0.1 }
+    );
+    if (jobsSentinelRef.current) observer.observe(jobsSentinelRef.current);
+    return () => observer.disconnect();
+  }, [hasNextJobsPage, isFetchingNextJobsPage, fetchNextJobsPage]);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries[0].isIntersecting && hasNextBidsPage && !isFetchingNextBidsPage) {
+          fetchNextBidsPage();
+        }
+      },
+      { threshold: 0.1 }
+    );
+    if (bidsSentinelRef.current) observer.observe(bidsSentinelRef.current);
+    return () => observer.disconnect();
+  }, [hasNextBidsPage, isFetchingNextBidsPage, fetchNextBidsPage]);
+
+  const { data: myAgent } = useQuery<Agent | null>({
+    queryKey: ['myAgent', publicKey],
+    queryFn: async () => {
       const client = getContractClient();
       return getMockMyAgent(publicKey);
-    }
-  );
+    },
+  });
 
-  const { data: stats } = useQuery<PlatformStats>(
-    'dashboardStats',
-    async () => {
+  const { data: stats } = useQuery<PlatformStats>({
+    queryKey: ['dashboardStats'],
+    queryFn: async () => {
       const client = getContractClient();
       return getMockStats();
     },
-    { staleTime: 1000 * 60 * 10 }
-  );
+    staleTime: 1000 * 60 * 10,
+  });
 
 
 
@@ -320,9 +387,23 @@ export const Dashboard: React.FC = () => {
                 action={<Link to="/create-job"><Button>Post Your First Job</Button></Link>} 
               />
             ) : (
-              myJobs.map(job => (
-                <JobCard key={job.id} job={job} isClient={true} />
-              ))
+              <>
+                {myJobs.map(job => (
+                  <JobCard key={job.id} job={job} isClient={true} />
+                ))}
+                {/* Infinite-scroll sentinel */}
+                <div ref={jobsSentinelRef} className="flex justify-center py-4" aria-hidden="true">
+                  {isFetchingNextJobsPage && (
+                    <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                      Loading more jobs…
+                    </div>
+                  )}
+                  {!hasNextJobsPage && myJobs.length > 0 && (
+                    <p className="text-sm text-muted-foreground">All jobs loaded</p>
+                  )}
+                </div>
+              </>
             )}
           </div>
         )}
@@ -339,9 +420,23 @@ export const Dashboard: React.FC = () => {
                 action={<Link to="/marketplace"><Button>Browse Jobs</Button></Link>} 
               />
             ) : (
-              myBids.map(bid => (
-                <BidCard key={bid.id} bid={bid} />
-              ))
+              <>
+                {myBids.map((bid: any) => (
+                  <BidCard key={bid.id} bid={bid} />
+                ))}
+                {/* Infinite-scroll sentinel */}
+                <div ref={bidsSentinelRef} className="flex justify-center py-4" aria-hidden="true">
+                  {isFetchingNextBidsPage && (
+                    <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                      Loading more bids…
+                    </div>
+                  )}
+                  {!hasNextBidsPage && myBids.length > 0 && (
+                    <p className="text-sm text-muted-foreground">All bids loaded</p>
+                  )}
+                </div>
+              </>
             )}
           </div>
         )}

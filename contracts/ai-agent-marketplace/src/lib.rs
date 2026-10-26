@@ -1408,46 +1408,105 @@ impl AiAgentMarketplace {
         Self::get_review(&env, review_id)
     }
 
-    /// Get jobs by client
-    pub fn get_jobs_by_client(env: Env, client: Address) -> Vec<u64> {
-        env.storage().instance()
+    /// Get jobs by client (paginated).
+    ///
+    /// Returns a slice of the client's job-ID list starting at `offset` with
+    /// at most `limit` entries.  Returns an empty Vec when `offset` is beyond
+    /// the end of the stored list or when `limit` is 0.
+    ///
+    /// Clients should walk pages by incrementing `offset` by `limit` until the
+    /// returned Vec has fewer elements than `limit` (indicating the final page).
+    pub fn get_jobs_by_client(
+        env: Env,
+        client: Address,
+        offset: u64,
+        limit: u64,
+    ) -> Vec<u64> {
+        let all: Vec<u64> = env.storage().instance()
             .get(&DataKey::JobsByClient(client))
-            .unwrap_or(Vec::new(&env))
+            .unwrap_or(Vec::new(&env));
+        Self::paginate(&env, &all, offset, limit)
     }
 
-    /// Get jobs by agent
-    pub fn get_jobs_by_agent(env: Env, agent: Address) -> Vec<u64> {
-        env.storage().instance()
+    /// Get jobs by agent (paginated).
+    ///
+    /// Returns a slice of the agent's job-ID list starting at `offset` with
+    /// at most `limit` entries.  Returns an empty Vec when `offset` is out of
+    /// bounds or `limit` is 0.
+    pub fn get_jobs_by_agent(
+        env: Env,
+        agent: Address,
+        offset: u64,
+        limit: u64,
+    ) -> Vec<u64> {
+        let all: Vec<u64> = env.storage().instance()
             .get(&DataKey::JobsByAgent(agent))
-            .unwrap_or(Vec::new(&env))
+            .unwrap_or(Vec::new(&env));
+        Self::paginate(&env, &all, offset, limit)
     }
 
-    /// Get bids by job
-    pub fn get_bids_by_job(env: Env, job_id: u64) -> Vec<u64> {
-        env.storage().instance()
+    /// Get bids by job (paginated).
+    ///
+    /// Returns a slice of bid IDs for the given job starting at `offset` with
+    /// at most `limit` entries.
+    pub fn get_bids_by_job(
+        env: Env,
+        job_id: u64,
+        offset: u64,
+        limit: u64,
+    ) -> Vec<u64> {
+        let all: Vec<u64> = env.storage().instance()
             .get(&DataKey::BidsByJob(job_id))
-            .unwrap_or(Vec::new(&env))
+            .unwrap_or(Vec::new(&env));
+        Self::paginate(&env, &all, offset, limit)
     }
 
-    /// Get bids by agent
-    pub fn get_bids_by_agent(env: Env, agent: Address) -> Vec<u64> {
-        env.storage().instance()
+    /// Get bids by agent (paginated).
+    ///
+    /// Returns a slice of the agent's bid-ID list starting at `offset` with
+    /// at most `limit` entries.
+    pub fn get_bids_by_agent(
+        env: Env,
+        agent: Address,
+        offset: u64,
+        limit: u64,
+    ) -> Vec<u64> {
+        let all: Vec<u64> = env.storage().instance()
             .get(&DataKey::BidsByAgent(agent))
-            .unwrap_or(Vec::new(&env))
+            .unwrap_or(Vec::new(&env));
+        Self::paginate(&env, &all, offset, limit)
     }
 
-    /// Get reviews for an agent/user
-    pub fn get_reviews_by_reviewee(env: Env, reviewee: Address) -> Vec<u64> {
-        env.storage().instance()
+    /// Get reviews for an agent/user (paginated).
+    ///
+    /// Returns a slice of review IDs for the reviewee starting at `offset`
+    /// with at most `limit` entries.
+    pub fn get_reviews_by_reviewee(
+        env: Env,
+        reviewee: Address,
+        offset: u64,
+        limit: u64,
+    ) -> Vec<u64> {
+        let all: Vec<u64> = env.storage().instance()
             .get(&DataKey::ReviewsByReviewee(reviewee))
-            .unwrap_or(Vec::new(&env))
+            .unwrap_or(Vec::new(&env));
+        Self::paginate(&env, &all, offset, limit)
     }
 
-    /// Get agents by skill
-    pub fn get_agents_by_skill(env: Env, skill: String) -> Vec<u64> {
-        env.storage().instance()
+    /// Get agents by skill (paginated).
+    ///
+    /// Returns a slice of agent IDs that have the given skill starting at
+    /// `offset` with at most `limit` entries.
+    pub fn get_agents_by_skill(
+        env: Env,
+        skill: String,
+        offset: u64,
+        limit: u64,
+    ) -> Vec<u64> {
+        let all: Vec<u64> = env.storage().instance()
             .get(&DataKey::SkillAgents(skill))
-            .unwrap_or(Vec::new(&env))
+            .unwrap_or(Vec::new(&env));
+        Self::paginate(&env, &all, offset, limit)
     }
 
     /// Get platform configuration
@@ -1572,6 +1631,25 @@ impl AiAgentMarketplace {
     }
 
     // ========== Helper Functions ==========
+
+    /// Slice a Vec<u64> from `offset` up to `offset + limit`.
+    ///
+    /// - Returns an empty Vec when `offset >= all.len()` or `limit == 0`.
+    /// - Clamps the end index to the actual length so callers never need to
+    ///   worry about out-of-bounds accesses.
+    fn paginate(env: &Env, all: &Vec<u64>, offset: u64, limit: u64) -> Vec<u64> {
+        let total = all.len() as u64;
+        if limit == 0 || offset >= total {
+            return Vec::new(env);
+        }
+        let start = offset as u32;
+        let end_exclusive = ((offset + limit).min(total)) as u32;
+        let mut page = Vec::new(env);
+        for i in start..end_exclusive {
+            page.push_back(all.get(i).unwrap());
+        }
+        page
+    }
 
     fn has_config(env: &Env) -> bool {
         env.storage().instance().has(&DataKey::Config)
