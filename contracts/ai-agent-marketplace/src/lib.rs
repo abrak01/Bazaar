@@ -1345,6 +1345,8 @@ impl AiAgentMarketplace {
         let expiry_seconds = config.escrow_expiry_days * 86_400;
         let expiry_time = escrow.created_at + expiry_seconds;
         if env.ledger().timestamp() <= expiry_time {
+        // Note: EscrowExpired is repurposed here to mean 'not yet expired / too early to reclaim'.
+        // A future refactor may introduce a dedicated EscrowNotExpired error variant.
             return Err(Error::EscrowExpired);
         }
 
