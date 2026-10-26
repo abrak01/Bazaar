@@ -542,6 +542,24 @@ const ESCROW_EXPIRY_DAYS = 30;
                         <span className="text-muted-foreground">Status</span>
                         <Badge variant={job.status === 'Completed' ? 'success' : 'default'}>
                           {job.status === 'Completed' ? 'Released' : 'Funded'}
+                    </Badge>
+                  </div>
+                  {escrowExpiryTime && (
+                    <div className="flex items-center justify-between text-sm border-t pt-3">
+                      <span className="text-muted-foreground">Expires</span>
+                      <span className={clsx(
+'font-medium'
+, isEscrowExpired ? 
+'text-destructive'
+ : 
+'text-foreground'
+)}>
+                        {isEscrowExpired ? `Expired ${formatDistanceToNow(new Date(escrowExpiryTime), { addSuffix: true })}` : format(new Date(escrowExpiryTime), 
+'MMM d, yyyy'
+)}
+                      </span>
+                    </div>
+                  )}
                         </Badge>
                       </div>
                     </CardContent>
