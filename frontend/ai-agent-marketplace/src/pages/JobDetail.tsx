@@ -705,6 +705,15 @@ const ESCROW_EXPIRY_DAYS = 30;
                       color="text-destructive" 
                       title="Refunded" 
                       description="Payment refunded to client"
+                  {job.status === 'Refunded' && job.escrowCreatedAt && (
+                    <ActivityItem
+                      icon={RefreshCw}
+                      color="text-orange-500"
+                      title="Escrow Funds Reclaimed"
+                      description="Client reclaimed escrowed funds after expiry window"
+                      time={job.escrowCreatedAt + ESCROW_EXPIRY_DAYS * 86400 + 1}
+                    />
+                  )}
                       time={job.createdAt + 86400 * 10}
                     />
                   )}
