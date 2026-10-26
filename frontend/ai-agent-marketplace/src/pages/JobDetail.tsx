@@ -188,6 +188,17 @@ const ESCROW_EXPIRY_DAYS = 30;
   const daysLeft = Math.max(0, Math.ceil(timeLeft / (1000 * 60 * 60 * 24)));
   const isExpired = timeLeft <= 0;
 
+  // Escrow expiry: client can reclaim funds if escrow is still Funded after ESCROW_EXPIRY_DAYS
+  const escrowExpiryTime = job.escrowCreatedAt
+    ? (job.escrowCreatedAt + ESCROW_EXPIRY_DAYS * 86400) * 1000
+    : null;
+  const isEscrowExpired = escrowExpiryTime !== null && Date.now() > escrowExpiryTime;
+  const canReclaimFunds =
+    isClient &&
+    job.status === 'InProgress' &&
+    isEscrowExpired &&
+    job.escrowAmount > 0;
+
   const statusConfig = {
     Open: { label: 'Open for Bids', color: 'success', icon: DollarSign },
     InProgress: { label: 'In Progress', color: 'default' as const, icon: Clock },
