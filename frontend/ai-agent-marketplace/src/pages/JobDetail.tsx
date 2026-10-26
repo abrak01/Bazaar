@@ -197,6 +197,7 @@ const ESCROW_EXPIRY_DAYS = 30;
     ? (job.escrowCreatedAt + ESCROW_EXPIRY_DAYS * 86400) * 1000
     : null;
   const isEscrowExpired = escrowExpiryTime !== null && Date.now() > escrowExpiryTime;
+  // All four conditions must hold before showing the Reclaim Funds button
   const canReclaimFunds =
     isClient &&
     job.status === 'InProgress' &&
