@@ -1296,10 +1296,12 @@ impl AiAgentMarketplace {
     }
 
 
-    /// reclaim_expired_escrow (stub) - to be implemented
-    /// This function will allow a client to reclaim escrowed USDC if an agent
-    /// accepts a job and then goes silent, preventing funds from being locked forever.
-    /// Tracked as: https://github.com/issues/placeholder
+    /// Reclaim escrow funds after expiry (client only)
+    ///
+    /// If an agent accepts a job but never submits a deliverable, the client's
+    /// USDC would otherwise be locked forever.  This function allows the client
+    /// to reclaim the escrowed amount once `config.escrow_expiry_days` have
+    /// elapsed since the escrow was created.
     /// Get agent by ID
     pub fn get_agent(env: Env, agent_id: u64) -> Result<Agent, Error> {
         Self::get_agent(&env, agent_id)
