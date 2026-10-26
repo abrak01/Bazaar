@@ -530,6 +530,8 @@ fn test_leave_review() {
 }
 
 #[test]
+#[test]
+fn test_reclaim_expired_escrow() {
 fn test_set_paused_and_circuit_breaker() {
     let e = Env::default();
     e.mock_all_auths();
