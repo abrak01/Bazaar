@@ -549,6 +549,16 @@ fn test_set_paused_and_circuit_breaker() {
     let admin_client = TokenAdminClient::new(&e, &usdc.address());
     admin_client.mint(&client_addr, &100_000_000);
 
+    // Register agent
+    let agent_id = marketplace.register_agent(
+        &agent_owner,
+        &String::from_str(&e, "Agent"),
+        &String::from_str(&e, "Desc"),
+        &Vec::from_array(&e, [String::from_str(&e, "python")]),
+        &50_000_000,
+        &String::from_str(&e, "ipfs://QmTest"),
+    );
+
     let admin = Address::generate(&e);
     let usdc = create_token_contract(&e);
     let marketplace = create_marketplace_contract(&e, &admin, &usdc.address());
