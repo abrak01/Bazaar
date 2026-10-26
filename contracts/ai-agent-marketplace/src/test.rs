@@ -566,6 +566,15 @@ fn test_set_paused_and_circuit_breaker() {
         &Vec::from_array(&e, [String::from_str(&e, "python")]),
         &100_000_000,
         &14,
+
+    // Place bid
+    let bid_id = marketplace.place_bid(
+        &agent_owner,
+        &job_id,
+        &80_000_000,
+        &7,
+        &String::from_str(&e, "Proposal"),
+    );
     );
     );
 
