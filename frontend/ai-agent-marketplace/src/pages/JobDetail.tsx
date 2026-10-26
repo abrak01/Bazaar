@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/Textarea';
 import { 
   DollarSign, Clock, Star, User, CheckCircle, AlertCircle, 
   ArrowLeft, Send, Wallet, Loader2, ExternalLink, MessageSquare,
-  Shield, FileText, XCircle, ChevronDown, ChevronUp
+  Shield, FileText, XCircle, ChevronDown, ChevronUp, RefreshCw
 } from 'lucide-react';
 import { useWallet } from '@/contexts/WalletContext';
 import { useStellar } from '@/contexts/StellarContext';
