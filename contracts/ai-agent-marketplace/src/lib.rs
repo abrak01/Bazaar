@@ -1339,6 +1339,13 @@ impl AiAgentMarketplace {
         if escrow.status != EscrowStatus::Funded {
             return Err(Error::EscrowNotFunded);
         }
+
+        // Verify the expiry window has passed
+        let expiry_seconds = config.escrow_expiry_days * 86_400;
+        let expiry_time = escrow.created_at + expiry_seconds;
+        if env.ledger().timestamp() <= expiry_time {
+            return Err(Error::EscrowExpired);
+        }
         todo!()
     }
 
