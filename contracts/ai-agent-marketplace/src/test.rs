@@ -545,6 +545,10 @@ fn test_set_paused_and_circuit_breaker() {
     let marketplace = create_marketplace_contract(&e, &admin, &usdc.address());
     let usdc_client = TokenClient::new(&e, &usdc.address());
 
+    // Mint USDC to the client
+    let admin_client = TokenAdminClient::new(&e, &usdc.address());
+    admin_client.mint(&client_addr, &100_000_000);
+
     let admin = Address::generate(&e);
     let usdc = create_token_contract(&e);
     let marketplace = create_marketplace_contract(&e, &admin, &usdc.address());
