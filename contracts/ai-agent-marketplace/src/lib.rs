@@ -1328,6 +1328,12 @@ impl AiAgentMarketplace {
         if job.client != client {
             return Err(Error::Unauthorized);
         }
+
+        // Look up the escrow
+        let escrow_id: u64 = env.storage().instance()
+            .get(&DataKey::EscrowByJob(job_id))
+            .ok_or(Error::EscrowNotFound)?;
+        let mut escrow = Self::get_escrow(&env, escrow_id)?;
         todo!()
     }
 
