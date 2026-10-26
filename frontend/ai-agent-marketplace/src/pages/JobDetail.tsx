@@ -907,6 +907,8 @@ Deliverables:
         },
       ],
       escrowAmount: 75000000,
+      // escrowCreatedAt 5 days ago -- still within the 30-day expiry window for demo
+      escrowCreatedAt: Math.floor(Date.now() / 1000) - 86400 * 5,
       createdAt: Math.floor(Date.now() / 1000) - 86400 * 5,
       completedAt: null,
       deliverableHash: null,
