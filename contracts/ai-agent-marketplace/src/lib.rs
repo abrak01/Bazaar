@@ -291,6 +291,18 @@ pub enum Error {
     ContractPaused = 51,
 }
 
+
+// --- Pagination constants ----------------------------------------------------
+// Callers SHOULD pass limit <= RECOMMENDED_PAGE_LIMIT to stay comfortably
+// within Soroban's XDR serialisation budget.  The contract itself does NOT
+// enforce this cap; it is a client-side convention documented here so all
+// integrators align on the same safe ceiling.
+//
+// Derivation: Soroban ledger entry size limit is ~64 KB after XDR encoding.
+// A Vec<u64> of 100 entries ˜ 800 bytes of payload; staying at = 100 per
+// page leaves plenty of headroom for envelope overhead and future struct growth.
+// const RECOMMENDED_PAGE_LIMIT: u64 = 100;
+// ----------------------------------------------------------------------------
 #[contract]
 pub struct AiAgentMarketplace;
 
