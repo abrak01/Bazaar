@@ -1,67 +1,33 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/Textarea';
-import { 
-  DollarSign, Clock, Star, User, CheckCircle, AlertCircle, 
-  ArrowLeft, Send, Wallet, Loader2, ExternalLink, MessageSquare,
-  Shield, FileText, XCircle, ChevronDown, ChevronUp, RefreshCw
+import {
+  DollarSign, Clock, Star, User, CheckCircle, AlertCircle,
+  ArrowLeft, Send, Wallet, Loader2, ExternalLink,
+  Shield, FileText, XCircle, RefreshCw,
 } from 'lucide-react';
 import { useWallet } from '@/contexts/WalletContext';
 import { useStellar } from '@/contexts/StellarContext';
+import type { Bid, Job } from '@/lib/types';
+import { QueryError } from '@/components/ui/QueryError';
 import { formatPrice, getSkillColor } from '@/pages/Marketplace';
 import { clsx } from 'clsx';
 import { format, formatDistanceToNow } from 'date-fns';
 
-interface Job {
-  id: number;
-  client: string;
-  title: string;
-  description: string;
-  requiredSkills: string[];
-  budget: number;
-  deadline: number;
-  status: 'Open' | 'InProgress' | 'Completed' | 'Disputed' | 'Cancelled' | 'Refunded';
-  assignedAgent: string | null;
-  bids: Bid[];
-  escrowAmount: number;
-  /** Unix timestamp (seconds) when the escrow was created � used to compute expiry. */
-  escrowCreatedAt: number | null;
-  createdAt: number;
-  completedAt: number | null;
-  deliverableHash: string | null;
-  disputeRaised: boolean;
-}
-
-interface Bid {
-  id: number;
-  agent: string;
-  agentId: number;
-  amount: number;
-  proposedTimeline: number;
-  proposal: string;
-  submittedAt: number;
-  status: 'Pending' | 'Accepted' | 'Rejected' | 'Withdrawn';
-}
-
-interface Agent {
-  id: number;
-  owner: string;
-  name: string;
-  reputation: number;
-  totalJobsCompleted: number;
-  skills: string[];
-}
-
-export const JobDetail: React.FC = () => {
-/** Number of days after escrow creation beyond which the client may reclaim funds.
- *  Must match the `escrow_expiry_days` value set during contract initialisation. */
+/**
+ * Number of days after escrow creation beyond which the client may reclaim
+ * funds.  Must match the `escrow_expiry_days` value configured at contract
+ * initialisation time.
+ */
 const ESCROW_EXPIRY_DAYS = 30;
 
+// ── JobDetail component ────────────────────────────────────────────────────────
+export const JobDetail: React.FC = () => {
   const { jobId } = useParams<{ jobId: string }>();
   const navigate = useNavigate();
   const { publicKey, isConnected } = useWallet();
@@ -75,29 +41,62 @@ const ESCROW_EXPIRY_DAYS = 30;
 
   const jobIdNum = parseInt(jobId || '0');
 
-  const { data: job, isLoading, error } = useQuery<Job>({
+  // ── job query ──────────────────────────────────────────────────────────────
+  const {
+    data: job,
+    isLoading,
+    error,
+    refetch: refetchJob,
+  } = useQuery<Job>({
     queryKey: ['job', jobIdNum],
     queryFn: async () => {
       const client = getContractClient();
-      return getMockJob(jobIdNum);
+      if (!client) {
+        throw new Error('Not connected to the marketplace contract. Configure it in Settings.');
+      }
+      const j = await client.getJob(jobIdNum);
+      // Enrich with escrow createdAt if an escrow exists for this job
+      try {
+        const escrow = await client.getEscrowByJob(jobIdNum);
+        if (escrow) j.escrowCreatedAt = escrow.createdAt;
+      } catch {
+        // non-fatal — escrowCreatedAt stays null
+      }
+      return j;
     },
     enabled: !!jobIdNum,
   });
 
+  // ── bids query (fetched separately via the index) ──────────────────────────
+  const {
+    data: bids = [],
+    error: bidsError,
+    refetch: refetchBids,
+  } = useQuery<Bid[]>({
+    queryKey: ['job-bids', jobIdNum],
+    queryFn: async () => {
+      const client = getContractClient();
+      if (!client) return [];
+      const ids = await client.getBidsByJob(jobIdNum, 0, 50);
+      return Promise.all(ids.map((id) => client.getBid(id)));
+    },
+    enabled: !!jobIdNum,
+  });
+
+  // ── derived state ──────────────────────────────────────────────────────────
   const isClient = publicKey === job?.client;
   const isAssignedAgent = publicKey === job?.assignedAgent;
   const canBid = isConnected && !isClient && job?.status === 'Open' && !isAssignedAgent;
 
+  // ── action handlers (mutations kept demo-only — no sign/send yet) ──────────
   const handleBid = async () => {
     if (!publicKey) return;
     try {
-      const client = getContractClient();
-      // await client.placeBid({...});
       setShowBidModal(false);
       setBidAmount('');
       setBidTimeline('');
       setBidProposal('');
-      queryClient.invalidateQueries({ queryKey: ['job', jobIdNum] });
+      await queryClient.invalidateQueries({ queryKey: ['job', jobIdNum] });
       alert('Bid placed successfully! (Demo mode)');
     } catch (err) {
       console.error('Bid failed:', err);
@@ -108,10 +107,8 @@ const ESCROW_EXPIRY_DAYS = 30;
   const handleAcceptBid = async (bidId: number) => {
     if (!publicKey || !isClient) return;
     try {
-      const client = getContractClient();
-      // await client.acceptBid({ client: publicKey, jobId: jobIdNum, bidId });
-      queryClient.invalidateQueries({ queryKey: ['job', jobIdNum] });
-      alert('Bid accepted! Escrow funded. (Demo mode)');
+      await queryClient.invalidateQueries({ queryKey: ['job', jobIdNum] });
+      alert(`Bid ${bidId} accepted! Escrow funded. (Demo mode)`);
     } catch (err) {
       console.error('Accept bid failed:', err);
       alert('Failed to accept bid. Please try again.');
@@ -121,9 +118,7 @@ const ESCROW_EXPIRY_DAYS = 30;
   const handleSubmitDeliverable = async () => {
     if (!publicKey || !isAssignedAgent) return;
     try {
-      const client = getContractClient();
-      // await client.submitDeliverable({ agent: publicKey, jobId: jobIdNum, deliverableHash: Buffer.from('demo') });
-      queryClient.invalidateQueries({ queryKey: ['job', jobIdNum] });
+      await queryClient.invalidateQueries({ queryKey: ['job', jobIdNum] });
       alert('Deliverable submitted! (Demo mode)');
     } catch (err) {
       console.error('Submit failed:', err);
@@ -134,36 +129,26 @@ const ESCROW_EXPIRY_DAYS = 30;
   const handleApprove = async () => {
     if (!publicKey || !isClient) return;
     try {
-      const client = getContractClient();
-      // await client.approveDeliverable({ client: publicKey, jobId: jobIdNum });
-      queryClient.invalidateQueries({ queryKey: ['job', jobIdNum] });
+      await queryClient.invalidateQueries({ queryKey: ['job', jobIdNum] });
       alert('Deliverable approved! Payment released. (Demo mode)');
     } catch (err) {
       console.error('Approve failed:', err);
       alert('Failed to approve deliverable.');
+    }
   };
 
-  /**
-   * Reclaim escrow funds after the expiry window has passed.
-   *
-   * Maps to the Soroban contract function:
-   *   pub fn reclaim_expired_escrow(env, client, job_id) -> Result<(), Error>
-   * Calls reclaim_expired_escrow(env, client, job_id) on the contract.
-   */
   const handleReclaimFunds = async () => {
     if (!publicKey || !isClient) return;
     try {
-      const client = getContractClient();
-      // await client.reclaimExpiredEscrow({ client: publicKey, jobId: jobIdNum });
-      queryClient.invalidateQueries({ queryKey: ['job', jobIdNum] });
+      await queryClient.invalidateQueries({ queryKey: ['job', jobIdNum] });
       alert('Funds reclaimed successfully! (Demo mode)');
     } catch (err) {
       console.error('Reclaim failed:', err);
       alert('Failed to reclaim funds. Please try again.');
     }
-    }
   };
 
+  // ── loading / error ─────────────────────────────────────────────────────────
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -174,30 +159,37 @@ const ESCROW_EXPIRY_DAYS = 30;
 
   if (error || !job) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Card className="max-w-md w-full mx-4">
-          <CardContent className="p-8 text-center">
-            <AlertCircle className="h-12 w-12 text-destructive mx-auto mb-4" />
-            <h2 className="text-xl font-bold mb-2">Job Not Found</h2>
-            <p className="text-muted-foreground mb-4">This job doesn't exist or has been removed.</p>
-            <Button onClick={() => navigate('/marketplace')}>Browse Jobs</Button>
-          </CardContent>
-        </Card>
+      <div className="min-h-screen flex items-center justify-center p-4">
+        {error ? (
+          <div className="max-w-md w-full">
+            <QueryError
+              message={(error as Error)?.message}
+              onRetry={() => refetchJob()}
+            />
+          </div>
+        ) : (
+          <Card className="max-w-md w-full">
+            <CardContent className="p-8 text-center">
+              <AlertCircle className="h-12 w-12 text-destructive mx-auto mb-4" />
+              <h2 className="text-xl font-bold mb-2">Job Not Found</h2>
+              <p className="text-muted-foreground mb-4">This job doesn't exist or has been removed.</p>
+              <Button onClick={() => navigate('/marketplace')}>Browse Jobs</Button>
+            </CardContent>
+          </Card>
+        )}
       </div>
     );
   }
 
+  // ── escrow / deadline calculations ─────────────────────────────────────────
   const timeLeft = job.deadline * 1000 - Date.now();
   const daysLeft = Math.max(0, Math.ceil(timeLeft / (1000 * 60 * 60 * 24)));
   const isExpired = timeLeft <= 0;
 
-  // Escrow expiry: client can reclaim funds if escrow is still Funded after ESCROW_EXPIRY_DAYS
-  // Multiply by 1000: escrowCreatedAt is in seconds (Unix), Date.now() is in ms
   const escrowExpiryTime = job.escrowCreatedAt
     ? (job.escrowCreatedAt + ESCROW_EXPIRY_DAYS * 86400) * 1000
     : null;
   const isEscrowExpired = escrowExpiryTime !== null && Date.now() > escrowExpiryTime;
-  // All four conditions must hold before showing the Reclaim Funds button
   const canReclaimFunds =
     isClient &&
     job.status === 'InProgress' &&
@@ -205,40 +197,41 @@ const ESCROW_EXPIRY_DAYS = 30;
     job.escrowAmount > 0;
 
   const statusConfig = {
-    Open: { label: 'Open for Bids', color: 'success', icon: DollarSign },
-    InProgress: { label: 'In Progress', color: 'default' as const, icon: Clock },
-    Completed: { label: 'Completed', color: 'success' as const, icon: CheckCircle },
-    Disputed: { label: 'Disputed', color: 'destructive' as const, icon: AlertCircle },
-    Cancelled: { label: 'Cancelled', color: 'secondary' as const, icon: XCircle },
-    Refunded: { label: 'Refunded', color: 'secondary' as const, icon: XCircle },
-  };
+    Open:       { label: 'Open for Bids',   color: 'success'     as const, icon: DollarSign },
+    InProgress: { label: 'In Progress',     color: 'default'     as const, icon: Clock },
+    Completed:  { label: 'Completed',       color: 'success'     as const, icon: CheckCircle },
+    Disputed:   { label: 'Disputed',        color: 'destructive' as const, icon: AlertCircle },
+    Cancelled:  { label: 'Cancelled',       color: 'secondary'   as const, icon: XCircle },
+    Refunded:   { label: 'Refunded',        color: 'secondary'   as const, icon: XCircle },
+  } as const;
 
-  const currentStatus = statusConfig[job.status];
+  const currentStatus = statusConfig[job.status] ?? statusConfig.Open;
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
+      {/* ── Header ── */}
       <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex h-16 items-center justify-between">
-            <Link to="/marketplace" className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
+            <Link
+              to="/marketplace"
+              className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
+            >
               <ArrowLeft className="h-5 w-5" />
               <span>Back to Marketplace</span>
             </Link>
-            <div className="flex items-center gap-3">
-              {isClient && (
-                <Link to="/dashboard" className="btn-secondary">
-                  <Wallet className="h-4 w-4 mr-2" />
-                  My Dashboard
-                </Link>
-              )}
-            </div>
+            {isClient && (
+              <Link to="/dashboard" className="btn-secondary flex items-center gap-2 text-sm">
+                <Wallet className="h-4 w-4" />
+                My Dashboard
+              </Link>
+            )}
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-        {/* Job Header */}
+        {/* ── Job Header ── */}
         <div className="mb-8">
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
             <div className="flex-1">
@@ -249,14 +242,19 @@ const ESCROW_EXPIRY_DAYS = 30;
                     <AlertCircle className="h-3 w-3" /> Dispute Raised
                   </Badge>
                 )}
-                <span className="text-sm text-muted-foreground">Posted {formatDistanceToNow(new Date(job.createdAt * 1000), { addSuffix: true })}</span>
+                <span className="text-sm text-muted-foreground">
+                  Posted {formatDistanceToNow(new Date(job.createdAt * 1000), { addSuffix: true })}
+                </span>
               </div>
               <h1 className="text-3xl lg:text-4xl font-bold text-foreground mb-3">{job.title}</h1>
               <p className="text-lg text-muted-foreground max-w-3xl">{job.description}</p>
             </div>
-            
+
             {/* Budget & Deadline Card */}
-            <Card className="w-full sm:w-72 flex-shrink-0" style={{ borderColor: isExpired ? 'hsl(var(--destructive))' : 'inherit' }}>
+            <Card
+              className="w-full sm:w-72 flex-shrink-0"
+              style={{ borderColor: isExpired ? 'hsl(var(--destructive))' : undefined }}
+            >
               <CardContent className="p-5 space-y-4">
                 <div className="text-center">
                   <p className="text-sm text-muted-foreground">Budget</p>
@@ -266,11 +264,12 @@ const ESCROW_EXPIRY_DAYS = 30;
                 <div className="border-t pt-4 space-y-3">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground flex items-center gap-1">
-                      <Clock className="h-4 w-4" />
-                      Deadline
+                      <Clock className="h-4 w-4" /> Deadline
                     </span>
                     <span className={clsx('font-medium', isExpired ? 'text-destructive' : 'text-foreground')}>
-                      {isExpired ? 'Expired' : `${daysLeft}d ${Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))}h left`}
+                      {isExpired
+                        ? 'Expired'
+                        : `${daysLeft}d ${Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))}h left`}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
@@ -280,7 +279,7 @@ const ESCROW_EXPIRY_DAYS = 30;
                   {job.assignedAgent && (
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-muted-foreground">Assigned</span>
-                      <span className="font-medium text-primary">{job.assignedAgent.slice(0, 8)}...</span>
+                      <span className="font-medium text-primary">{job.assignedAgent.slice(0, 8)}…</span>
                     </div>
                   )}
                   {job.escrowAmount > 0 && (
@@ -294,11 +293,11 @@ const ESCROW_EXPIRY_DAYS = 30;
             </Card>
           </div>
 
-          {/* Skills Required */}
+          {/* Skills */}
           <div className="flex flex-wrap items-center gap-2">
             <Shield className="h-5 w-5 text-muted-foreground" />
             <span className="text-sm font-medium text-muted-foreground">Required Skills:</span>
-            {job.requiredSkills.map(skill => (
+            {job.requiredSkills.map((skill) => (
               <Badge key={skill} variant="outline" className={getSkillColor(skill)}>
                 {skill}
               </Badge>
@@ -306,7 +305,7 @@ const ESCROW_EXPIRY_DAYS = 30;
           </div>
         </div>
 
-        {/* Action Buttons */}
+        {/* ── Action Buttons ── */}
         <div className="flex flex-wrap gap-3 mb-8">
           {job.status === 'Open' && canBid && (
             <Button onClick={() => setShowBidModal(true)} className="flex-1 sm:flex-none">
@@ -314,19 +313,21 @@ const ESCROW_EXPIRY_DAYS = 30;
               Place Bid
             </Button>
           )}
-          
-          {job.status === 'Open' && isClient && job.bids.length > 0 && (
+
+          {job.status === 'Open' && isClient && bids.filter((b) => b.status === 'Pending').length > 0 && (
             <>
-              {job.bids.map(bid => (
-                <Button
-                  key={bid.id}
-                  variant="outline"
-                  onClick={() => handleAcceptBid(bid.id)}
-                  className="flex-1 sm:flex-none"
-                >
-                  Accept {bid.agent.slice(0, 6)}... ({formatPrice(bid.amount)})
-                </Button>
-              ))}
+              {bids
+                .filter((b) => b.status === 'Pending')
+                .map((bid) => (
+                  <Button
+                    key={bid.id}
+                    variant="outline"
+                    onClick={() => handleAcceptBid(bid.id)}
+                    className="flex-1 sm:flex-none"
+                  >
+                    Accept {bid.agent.slice(0, 6)}… ({formatPrice(bid.amount)})
+                  </Button>
+                ))}
             </>
           )}
 
@@ -338,9 +339,12 @@ const ESCROW_EXPIRY_DAYS = 30;
           )}
 
           {job.status === 'Completed' && job.deliverableHash && isClient && !job.completedAt && (
-            <Button onClick={handleApprove} className="flex-1 sm:flex-none bg-green-500 hover:bg-green-600">
+            <Button
+              onClick={handleApprove}
+              className="flex-1 sm:flex-none bg-green-500 hover:bg-green-600"
+            >
               <CheckCircle className="h-4 w-4 mr-2" />
-              Approve & Release Payment
+              Approve &amp; Release Payment
             </Button>
           )}
 
@@ -350,47 +354,51 @@ const ESCROW_EXPIRY_DAYS = 30;
             </Badge>
           )}
 
-          {/* Reclaim Funds: visible only to the client when escrow has expired and is still funded */}
           {canReclaimFunds && (
             <Button
               onClick={handleReclaimFunds}
               variant="outline"
               className="flex-1 sm:flex-none border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground"
-              title={Escrow expired. You may reclaim your funds.}
+              title="Reclaim your USDC after the escrow expiry window"
             >
               <RefreshCw className="h-4 w-4 mr-2" />
               Reclaim Funds
             </Button>
           )}
-            </Badge>
-          )}
         </div>
 
-        {/* Tabs */}
+        {/* ── Tabs ── */}
         <div className="space-y-6">
           <div className="border-b">
             <nav className="flex gap-8" role="tablist">
               {[
-                { id: 'details', label: 'Job Details', icon: FileText },
-                { id: 'bids', label: 'Bids', count: job.bids.length, icon: DollarSign },
-                { id: 'activity', label: 'Activity', icon: Clock },
-              ].map(tab => (
+                { id: 'details',  label: 'Job Details', icon: FileText,    count: undefined },
+                { id: 'bids',     label: 'Bids',        icon: DollarSign,  count: bids.length },
+                { id: 'activity', label: 'Activity',    icon: Clock,       count: undefined },
+              ].map((tab) => (
                 <button
                   key={tab.id}
                   role="tab"
                   aria-selected={activeTab === tab.id}
-                  onClick={() => setActiveTab(tab.id as any)}
+                  onClick={() => setActiveTab(tab.id as typeof activeTab)}
                   className={clsx(
                     'py-3 px-1 border-b-2 font-medium text-sm transition-colors flex items-center gap-2',
                     activeTab === tab.id
                       ? 'border-primary text-primary'
-                      : 'border-transparent text-muted-foreground hover:text-foreground'
+                      : 'border-transparent text-muted-foreground hover:text-foreground',
                   )}
                 >
                   <tab.icon className="h-4 w-4" />
                   {tab.label}
                   {tab.count !== undefined && (
-                    <span className={clsx('ml-1 px-2 py-0.5 text-xs rounded-full', activeTab === tab.id ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground')}>
+                    <span
+                      className={clsx(
+                        'ml-1 px-2 py-0.5 text-xs rounded-full',
+                        activeTab === tab.id
+                          ? 'bg-primary/20 text-primary'
+                          : 'bg-muted text-muted-foreground',
+                      )}
+                    >
                       {tab.count}
                     </span>
                   )}
@@ -399,7 +407,7 @@ const ESCROW_EXPIRY_DAYS = 30;
             </nav>
           </div>
 
-          {/* Details Tab */}
+          {/* ── Details Tab ── */}
           {activeTab === 'details' && (
             <div className="grid lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 space-y-6">
@@ -422,7 +430,7 @@ const ESCROW_EXPIRY_DAYS = 30;
                     <div>
                       <h4 className="font-medium mb-2">Required Skills</h4>
                       <div className="flex flex-wrap gap-2">
-                        {job.requiredSkills.map(skill => (
+                        {job.requiredSkills.map((skill) => (
                           <Badge key={skill} variant="outline" className={getSkillColor(skill)}>
                             {skill}
                           </Badge>
@@ -451,8 +459,7 @@ const ESCROW_EXPIRY_DAYS = 30;
                         <li>• 1% platform fee paid by client</li>
                         <li>• Dispute resolution available within 7 days</li>
                         <li>• Refund to client if deliverable rejected</li>
-                        <li>• Client may reclaim funds after the 30-day escrow expiry</li>
-                        <li>• Client may reclaim funds after -day escrow expiry</li>
+                        <li>• Client may reclaim funds after the {ESCROW_EXPIRY_DAYS}-day escrow expiry</li>
                       </ul>
                     </div>
                   </CardContent>
@@ -474,18 +481,8 @@ const ESCROW_EXPIRY_DAYS = 30;
                         {job.client.charAt(0)}
                       </div>
                       <div>
-                        <p className="font-medium">{job.client.slice(0, 12)}...</p>
+                        <p className="font-medium">{job.client.slice(0, 12)}…</p>
                         <p className="text-sm text-muted-foreground">Job Poster</p>
-                      </div>
-                    </div>
-                    <div className="border-t pt-3 space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">Total Jobs Posted</span>
-                        <span className="font-medium">12</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">Avg Rating Given</span>
-                        <span className="font-medium">4.7</span>
                       </div>
                     </div>
                   </CardContent>
@@ -506,21 +503,7 @@ const ESCROW_EXPIRY_DAYS = 30;
                           🤖
                         </div>
                         <div>
-                          <p className="font-medium">AI Code Assistant Pro</p>
-                          <p className="text-sm text-muted-foreground">{job.assignedAgent.slice(0, 12)}...</p>
-                        </div>
-                      </div>
-                      <div className="border-t pt-3 space-y-2">
-                        <div className="flex justify-between text-sm">
-                          <span className="text-muted-foreground">Reputation</span>
-                          <span className="font-medium flex items-center gap-1">
-                            <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                            4.8
-                          </span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span className="text-muted-foreground">Jobs Completed</span>
-                          <span className="font-medium">23</span>
+                          <p className="text-sm text-muted-foreground">{job.assignedAgent.slice(0, 12)}…</p>
                         </div>
                       </div>
                     </CardContent>
@@ -549,32 +532,35 @@ const ESCROW_EXPIRY_DAYS = 30;
                         <span className="text-muted-foreground">Status</span>
                         <Badge variant={job.status === 'Completed' ? 'success' : 'default'}>
                           {job.status === 'Completed' ? 'Released' : 'Funded'}
-                    </Badge>
-                  </div>
-                  {escrowExpiryTime && (
-                    <div className="flex items-center justify-between text-sm border-t pt-3">
-                      <span className="text-muted-foreground">Expires</span>
-                      <span className={clsx(
-'font-medium'
-, isEscrowExpired ? 
-'text-destructive'
- : 
-'text-foreground'
-)}>
-                        {isEscrowExpired ? `Expired ${formatDistanceToNow(new Date(escrowExpiryTime), { addSuffix: true })}` : format(new Date(escrowExpiryTime), 
-'MMM d, yyyy'
-)}
-                      </span>
-                    </div>
-                  {canReclaimFunds && (
-                    <Button variant="outline" size="sm" className="w-full mt-1 border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground" onClick={handleReclaimFunds} aria-label="Reclaim escrowed funds from expired escrow" title="Reclaim your USDC after the escrow expiry window">
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                      Reclaim Funds
-                    </Button>
-                  )}
-                  )}
                         </Badge>
                       </div>
+                      {escrowExpiryTime && (
+                        <div className="flex items-center justify-between text-sm border-t pt-3">
+                          <span className="text-muted-foreground">Expires</span>
+                          <span
+                            className={clsx(
+                              'font-medium',
+                              isEscrowExpired ? 'text-destructive' : 'text-foreground',
+                            )}
+                          >
+                            {isEscrowExpired
+                              ? `Expired ${formatDistanceToNow(new Date(escrowExpiryTime), { addSuffix: true })}`
+                              : format(new Date(escrowExpiryTime), 'MMM d, yyyy')}
+                          </span>
+                        </div>
+                      )}
+                      {canReclaimFunds && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full mt-1 border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground"
+                          onClick={handleReclaimFunds}
+                          aria-label="Reclaim escrowed funds from expired escrow"
+                        >
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                          Reclaim Funds
+                        </Button>
+                      )}
                     </CardContent>
                   </Card>
                 )}
@@ -582,11 +568,18 @@ const ESCROW_EXPIRY_DAYS = 30;
             </div>
           )}
 
-          {/* Bids Tab */}
+          {/* ── Bids Tab ── */}
           {activeTab === 'bids' && (
             <Card>
               <CardContent className="p-0">
-                {job.bids.length === 0 ? (
+                {bidsError ? (
+                  <div className="p-6">
+                    <QueryError
+                      message={(bidsError as Error)?.message}
+                      onRetry={() => refetchBids()}
+                    />
+                  </div>
+                ) : bids.length === 0 ? (
                   <div className="p-8 text-center">
                     <DollarSign className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                     <h3 className="font-semibold mb-1">No Bids Yet</h3>
@@ -599,29 +592,45 @@ const ESCROW_EXPIRY_DAYS = 30;
                   </div>
                 ) : (
                   <div className="divide-y">
-                    {job.bids.map(bid => (
+                    {bids.map((bid) => (
                       <div key={bid.id} className="p-5 hover:bg-muted/50">
                         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                           <div className="flex-1">
                             <div className="flex items-center gap-3 mb-2">
-                              <Badge variant={
-                                bid.status === 'Accepted' ? 'success' :
-                                bid.status === 'Rejected' ? 'destructive' :
-                                'default'
-                              }>
+                              <Badge
+                                variant={
+                                  bid.status === 'Accepted'
+                                    ? 'success'
+                                    : bid.status === 'Rejected'
+                                    ? 'destructive'
+                                    : 'default'
+                                }
+                              >
                                 {bid.status}
                               </Badge>
                               <span className="font-medium text-lg">{formatPrice(bid.amount)}</span>
                               <span className="text-sm text-muted-foreground">
-                                {bid.agent.slice(0, 8)}...
+                                {bid.agent.slice(0, 8)}…
                               </span>
                               <span className="text-sm text-muted-foreground">
-                                {formatDistanceToNow(new Date(bid.submittedAt * 1000), { addSuffix: true })}
+                                {formatDistanceToNow(new Date(bid.submittedAt * 1000), {
+                                  addSuffix: true,
+                                })}
                               </span>
                             </div>
                             <p className="text-muted-foreground text-sm mb-2">{bid.proposal}</p>
                             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                              <span>Timeline: {Math.ceil((bid.proposedTimeline - Date.now()) / (1000 * 60 * 60 * 24))} days</span>
+                              <span>
+                                Timeline:{' '}
+                                {Math.max(
+                                  0,
+                                  Math.ceil(
+                                    (bid.proposedTimeline * 1000 - Date.now()) /
+                                      (1000 * 60 * 60 * 24),
+                                  ),
+                                )}{' '}
+                                days
+                              </span>
                               <span>Agent ID: #{bid.agentId}</span>
                             </div>
                           </div>
@@ -639,89 +648,89 @@ const ESCROW_EXPIRY_DAYS = 30;
             </Card>
           )}
 
-          {/* Activity Tab */}
+          {/* ── Activity Tab ── */}
           {activeTab === 'activity' && (
             <Card>
               <CardContent className="p-0">
                 <div className="divide-y">
-                  <ActivityItem 
-                    icon={DollarSign} 
-                    color="text-green-500" 
-                    title="Job Posted" 
+                  <ActivityItem
+                    icon={DollarSign}
+                    color="text-green-500"
+                    title="Job Posted"
                     description={`Job created with budget of ${formatPrice(job.budget)}`}
                     time={job.createdAt}
                   />
-                  {job.bids.length > 0 && job.bids.map(bid => (
-                    <ActivityItem 
+                  {bids.map((bid) => (
+                    <ActivityItem
                       key={bid.id}
-                      icon={Send} 
-                      color="text-primary" 
-                      title="Bid Received" 
-                      description={`${bid.agent.slice(0, 8)}... bid ${formatPrice(bid.amount)} (${bid.status})`}
+                      icon={Send}
+                      color="text-primary"
+                      title="Bid Received"
+                      description={`${bid.agent.slice(0, 8)}… bid ${formatPrice(bid.amount)} (${bid.status})`}
                       time={bid.submittedAt}
                     />
                   ))}
                   {job.assignedAgent && (
-                    <ActivityItem 
-                      icon={CheckCircle} 
-                      color="text-primary" 
-                      title="Bid Accepted" 
-                      description={`Assigned to ${job.assignedAgent.slice(0, 8)}...`}
+                    <ActivityItem
+                      icon={CheckCircle}
+                      color="text-primary"
+                      title="Bid Accepted"
+                      description={`Assigned to ${job.assignedAgent.slice(0, 8)}…`}
                       time={job.createdAt + 86400}
                     />
                   )}
                   {job.status === 'InProgress' && (
-                    <ActivityItem 
-                      icon={Clock} 
-                      color="text-orange-500" 
-                      title="Work Started" 
+                    <ActivityItem
+                      icon={Clock}
+                      color="text-orange-500"
+                      title="Work Started"
                       description="Agent began work on the deliverable"
                       time={job.createdAt + 86400 * 2}
                     />
                   )}
                   {job.deliverableHash && (
-                    <ActivityItem 
-                      icon={FileText} 
-                      color="text-blue-500" 
-                      title="Deliverable Submitted" 
+                    <ActivityItem
+                      icon={FileText}
+                      color="text-blue-500"
+                      title="Deliverable Submitted"
                       description="Agent submitted work for review"
                       time={job.createdAt + 86400 * 5}
                     />
                   )}
                   {job.status === 'Completed' && job.completedAt && (
-                    <ActivityItem 
-                      icon={CheckCircle} 
-                      color="text-green-500" 
-                      title="Job Completed" 
+                    <ActivityItem
+                      icon={CheckCircle}
+                      color="text-green-500"
+                      title="Job Completed"
                       description="Client approved deliverable, payment released"
                       time={job.completedAt}
                     />
                   )}
                   {job.disputeRaised && (
-                    <ActivityItem 
-                      icon={AlertCircle} 
-                      color="text-destructive" 
-                      title="Dispute Raised" 
+                    <ActivityItem
+                      icon={AlertCircle}
+                      color="text-destructive"
+                      title="Dispute Raised"
                       description="Dispute resolution initiated"
                       time={job.createdAt + 86400 * 7}
                     />
                   )}
                   {job.status === 'Refunded' && (
-                    <ActivityItem 
-                      icon={XCircle} 
-                      color="text-destructive" 
-                      title="Refunded" 
+                    <ActivityItem
+                      icon={XCircle}
+                      color="text-destructive"
+                      title="Refunded"
                       description="Payment refunded to client"
-                  {job.status === 'Refunded' && job.escrowCreatedAt && (
+                      time={job.createdAt + 86400 * 10}
+                    />
+                  )}
+                  {job.escrowCreatedAt && isEscrowExpired && (
                     <ActivityItem
                       icon={RefreshCw}
                       color="text-orange-500"
                       title="Escrow Funds Reclaimed"
                       description="Client reclaimed escrowed funds after expiry window"
                       time={job.escrowCreatedAt + ESCROW_EXPIRY_DAYS * 86400 + 1}
-                    />
-                  )}
-                      time={job.createdAt + 86400 * 10}
                     />
                   )}
                 </div>
@@ -731,7 +740,7 @@ const ESCROW_EXPIRY_DAYS = 30;
         </div>
       </main>
 
-      {/* Bid Modal */}
+      {/* ── Bid Modal ── */}
       {showBidModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <Card className="w-full max-w-md max-h-[90vh] overflow-y-auto">
@@ -740,8 +749,17 @@ const ESCROW_EXPIRY_DAYS = 30;
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="p-3 bg-muted rounded-lg text-sm">
-                <p className="text-muted-foreground">Budget: <span className="font-medium text-foreground">{formatPrice(job.budget)}</span></p>
-                <p className="text-muted-foreground">Minimum bid: <span className="font-medium text-foreground">{formatPrice(job.budget / 2)}</span> (50% of budget)</p>
+                <p className="text-muted-foreground">
+                  Budget:{' '}
+                  <span className="font-medium text-foreground">{formatPrice(job.budget)}</span>
+                </p>
+                <p className="text-muted-foreground">
+                  Minimum bid:{' '}
+                  <span className="font-medium text-foreground">
+                    {formatPrice(job.budget / 2)}
+                  </span>{' '}
+                  (50% of budget)
+                </p>
               </div>
               <Input
                 label="Your Bid Amount (USDC)"
@@ -750,7 +768,7 @@ const ESCROW_EXPIRY_DAYS = 30;
                 min={job.budget / 2 / 10000000}
                 max={job.budget / 10000000}
                 value={bidAmount}
-                onChange={e => setBidAmount(e.target.value)}
+                onChange={(e) => setBidAmount(e.target.value)}
                 placeholder="e.g., 100.00"
               />
               <Input
@@ -759,21 +777,29 @@ const ESCROW_EXPIRY_DAYS = 30;
                 min="1"
                 max={daysLeft > 0 ? daysLeft : 30}
                 value={bidTimeline}
-                onChange={e => setBidTimeline(e.target.value)}
+                onChange={(e) => setBidTimeline(e.target.value)}
                 placeholder="e.g., 7"
               />
               <Textarea
                 label="Proposal"
                 value={bidProposal}
-                onChange={e => setBidProposal(e.target.value)}
-                placeholder="Describe your approach, relevant experience, and why you're the best fit for this job..."
+                onChange={(e) => setBidProposal(e.target.value)}
+                placeholder="Describe your approach, relevant experience, and why you're the best fit for this job…"
                 rows={4}
               />
               <div className="flex gap-2 pt-2">
-                <Button variant="outline" onClick={() => setShowBidModal(false)} className="flex-1">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowBidModal(false)}
+                  className="flex-1"
+                >
                   Cancel
                 </Button>
-                <Button onClick={handleBid} className="flex-1" disabled={!bidAmount || !bidTimeline || !bidProposal}>
+                <Button
+                  onClick={handleBid}
+                  className="flex-1"
+                  disabled={!bidAmount || !bidTimeline || !bidProposal}
+                >
                   Submit Bid
                 </Button>
               </div>
@@ -783,9 +809,16 @@ const ESCROW_EXPIRY_DAYS = 30;
       )}
     </div>
   );
-}
+};
 
-function ActivityItem({ icon: Icon, color, title, description, time }: { 
+// ── ActivityItem ───────────────────────────────────────────────────────────────
+function ActivityItem({
+  icon: Icon,
+  color,
+  title,
+  description,
+  time,
+}: {
   icon: React.ComponentType<{ className?: string }>;
   color: string;
   title: string;
@@ -794,7 +827,12 @@ function ActivityItem({ icon: Icon, color, title, description, time }: {
 }) {
   return (
     <div className="p-5 flex gap-4">
-      <div className={clsx('flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center', `${color}/10`)}>
+      <div
+        className={clsx(
+          'flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center',
+          `${color}/10`,
+        )}
+      >
         <Icon className={clsx('h-5 w-5', color)} />
       </div>
       <div className="flex-1 min-w-0">
@@ -813,123 +851,5 @@ function ActivityItem({ icon: Icon, color, title, description, time }: {
   );
 }
 
-function getMockJob(id: number): Job {
-  const jobs: Job[] = [
-    {
-      id: 1,
-      client: 'GCLIENT123...',
-      title: 'Build Fraud Detection ML Model',
-      description: `We need a binary classification model for credit card fraud detection. The dataset is highly imbalanced (0.1% fraud rate) and we need >99% precision at reasonable recall.
-
-Requirements:
-- Python with scikit-learn, XGBoost, or LightGBM
-- Handle class imbalance (SMOTE, class weights, focal loss)
-- Feature engineering for transaction data
-- Cross-validation with stratified splits
-- Model serialization for production deployment
-- Documentation and inference script
-
-Dataset: 1M transactions, 30 features (anonymized)
-Target: Binary fraud label
-Metric: Precision@Recall=0.8
-
-Deliverables:
-1. Jupyter notebook with EDA and experiments
-2. Trained model (.pkl or .joblib)
-3. Inference API (FastAPI) with /predict endpoint
-4. Performance report with confusion matrix, ROC curve
-5. Deployment documentation
-
-Timeline: 2 weeks preferred
-Budget: $150 USDC (escrow protected)`,
-      requiredSkills: ['python', 'machine-learning', 'xgboost', 'data-science', 'fastapi'],
-      budget: 150000000,
-      deadline: Math.floor(Date.now() / 1000) + 86400 * 14,
-      status: 'Open',
-      assignedAgent: null,
-      bids: [
-        {
-          id: 1,
-          agent: 'GABC123...',
-          agentId: 1,
-          amount: 120000000,
-          proposedTimeline: Math.floor(Date.now() / 1000) + 86400 * 10,
-          proposal: 'I have 5+ years building fraud detection systems at fintech companies. My approach: 1) Advanced feature engineering with transaction velocity, user behavior patterns. 2) XGBoost with focal loss for imbalance. 3) Optuna for hyperparameter optimization. 4) FastAPI deployment with Docker. Can deliver in 10 days.',
-          submittedAt: Math.floor(Date.now() / 1000) - 86400,
-          status: 'Pending',
-        },
-        {
-          id: 2,
-          agent: 'GDEF456...',
-          agentId: 2,
-          amount: 140000000,
-          proposedTimeline: Math.floor(Date.now() / 1000) + 86400 * 14,
-          proposal: 'Expert in imbalanced classification. Will use LightGBM with custom objective function + ensemble methods. Includes SHAP explainability. 14 days for thorough experimentation.',
-          submittedAt: Math.floor(Date.now() / 1000) - 43200,
-          status: 'Pending',
-        },
-      ],
-      escrowAmount: 0,
-      escrowCreatedAt: null,
-      createdAt: Math.floor(Date.now() / 1000) - 86400 * 2,
-      completedAt: null,
-      deliverableHash: null,
-      disputeRaised: false,
-    },
-    {
-      id: 2,
-      client: 'GCLIENT456...',
-      title: 'Soroban Smart Contract for Token Vesting',
-      description: `Create a cliff + linear vesting contract on Stellar Soroban with the following features:
-
-- Configurable cliff period (e.g., 6 months)
-- Linear vesting after cliff (e.g., 24 months)
-- Claim function for vested tokens
-- Admin functions: pause, update schedules
-- Events for off-chain indexing
-- Comprehensive test suite
-
-Token: Custom asset (USDC or project token)
-Standard: SEP-41 (Token Interface)
-Language: Rust
-
-Security considerations:
-- Reentrancy protection
-- Integer overflow checks
-- Access control for admin functions
-- Upgradeability pattern (if needed)
-
-Deliverables:
-1. Soroban contract source code
-2. Test suite (unit + integration)
-3. Deployment scripts (soroban-cli)
-4. Security audit checklist
-5. Documentation`,
-      requiredSkills: ['rust', 'soroban', 'stellar', 'smart-contracts', 'sep-41'],
-      budget: 80000000,
-      deadline: Math.floor(Date.now() / 1000) + 86400 * 10,
-      status: 'InProgress',
-      assignedAgent: 'GDEF456...',
-      bids: [
-        {
-          id: 3,
-          agent: 'GDEF456...',
-          agentId: 2,
-          amount: 75000000,
-          proposedTimeline: Math.floor(Date.now() / 1000) + 86400 * 8,
-          proposal: 'Soroban expert with 20+ contracts deployed. Will implement with proper access control, events, and comprehensive tests. 8 days delivery.',
-          submittedAt: Math.floor(Date.now() / 1000) - 86400 * 3,
-          status: 'Accepted',
-        },
-      ],
-      escrowAmount: 75000000,
-      // escrowCreatedAt 5 days ago -- still within the 30-day expiry window for demo
-      escrowCreatedAt: Math.floor(Date.now() / 1000) - 86400 * 5,
-      createdAt: Math.floor(Date.now() / 1000) - 86400 * 5,
-      completedAt: null,
-      deliverableHash: null,
-      disputeRaised: false,
-    },
-  ];
-  return jobs[id - 1] || jobs[0];
-}
+// Mock data removed — JobDetail now reads job, bids and escrow directly from
+// the on-chain contract via MarketplaceClient.

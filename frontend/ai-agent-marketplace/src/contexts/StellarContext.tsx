@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   Contract, 
   SorobanRpc, 
@@ -12,6 +12,7 @@ import {
   Keypair,
   StrKey
 } from '@stellar/stellar-sdk';
+import { MarketplaceClient } from '@/lib/marketplaceClient';
 
 export interface ContractConfig {
   contractId: string;
@@ -30,7 +31,7 @@ export interface StellarContextType {
   sendTransaction: (tx: any, signFn: any) => Promise<any>;
   getContractData: (key: xdr.ScVal, durability?: 'persistent' | 'temporary') => Promise<xdr.ScVal | null>;
   invokeContract: (method: string, ...args: xdr.ScVal[]) => Promise<xdr.ScVal | null>;
-  getContractClient: () => any;
+  getContractClient: () => MarketplaceClient | null;
 }
 
 const StellarContext = createContext<StellarContextType | null>(null);
@@ -128,6 +129,14 @@ export const StellarProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return (simResult as any).result?.retval ?? null;
   }, [contract, rpc, config]);
 
+  // Typed contract client built from the current `invokeContract`. Returns
+  // null while not connected so pages can show a "connect" prompt instead of
+  // a generic fetch error.
+  const contractClient = useMemo<MarketplaceClient | null>(
+    () => (isConnected && invokeContract ? new MarketplaceClient(invokeContract) : null),
+    [isConnected, invokeContract],
+  );
+
   useEffect(() => {
     const saved = localStorage.getItem('stellar-contract-config');
     if (saved) {
@@ -152,7 +161,7 @@ export const StellarProvider: React.FC<{ children: React.ReactNode }> = ({ child
       sendTransaction,
       getContractData,
       invokeContract,
-      getContractClient: () => null,
+      getContractClient: () => contractClient,
     }}>
       {children}
     </StellarContext.Provider>

@@ -8,47 +8,10 @@ import { Input } from '@/components/ui/Input';
 import { Search, Filter, Star, DollarSign, Clock, Users, TrendingUp, ArrowRight, CheckCircle, AlertCircle } from 'lucide-react';
 import { useWallet } from '@/contexts/WalletContext';
 import { useStellar } from '@/contexts/StellarContext';
+import type { Agent, Job, PlatformStats } from '@/lib/types';
+import { QueryError } from '@/components/ui/QueryError';
 import { format, formatDistanceToNow } from 'date-fns';
 import { clsx } from 'clsx';
-
-interface Agent {
-  id: number;
-  owner: string;
-  name: string;
-  description: string;
-  skills: string[];
-  pricePerTask: number;
-  reputation: number;
-  totalJobsCompleted: number;
-  totalEarnings: number;
-  isActive: boolean;
-  createdAt: number;
-  skillsVerified: Record<string, boolean>;
-  metadataUri: string;
-}
-
-interface Job {
-  id: number;
-  client: string;
-  title: string;
-  description: string;
-  requiredSkills: string[];
-  budget: number;
-  deadline: number;
-  status: 'Open' | 'InProgress' | 'Completed' | 'Disputed' | 'Cancelled' | 'Refunded';
-  assignedAgent: string | null;
-  escrowAmount: number;
-  createdAt: number;
-}
-
-interface PlatformStats {
-  totalAgents: number;
-  totalJobs: number;
-  totalVolume: number;
-  totalFeesCollected: number;
-  totalDisputes: number;
-  avgJobCompletionTime: number;
-}
 
 const ALL_SKILLS = [
   'python', 'javascript', 'typescript', 'rust', 'go', 'java', 'cpp',
@@ -82,6 +45,7 @@ export const Marketplace: React.FC = () => {
     data: agentsPages,
     isLoading: agentsLoading,
     error: agentsError,
+    refetch: refetchAgents,
     fetchNextPage: fetchNextAgentsPage,
     hasNextPage: hasNextAgentsPage,
     isFetchingNextPage: isFetchingNextAgentsPage,
@@ -89,32 +53,21 @@ export const Marketplace: React.FC = () => {
     queryKey: ['agents', selectedSkills],
     queryFn: async ({ pageParam }) => {
       const offset = (pageParam as number) ?? 0;
-      try {
-        const client = getContractClient();
-        if (client) {
-          if (selectedSkills.length > 0) {
-            const sets = await Promise.all(
-              selectedSkills.map((skill: string) =>
-                client.getAgentsBySkill(skill, offset, PAGE_SIZE)
-              )
-            );
-            const intersection: number[] = sets[0].filter((id: number) =>
-              sets.every((s: number[]) => s.includes(id))
-            );
-            return Promise.all(intersection.map((id: number) => client.getAgent(id)));
-          }
-          const agentCount: number = await client.getAgentCounter();
-          const ids = Array.from(
-            { length: Math.min(PAGE_SIZE, Math.max(0, agentCount - offset)) },
-            (_, i) => offset + i + 1
-          );
-          return Promise.all(ids.map((id: number) => client.getAgent(id)));
-        }
-      } catch {
-        // fallback to mock
+      const client = getContractClient();
+      if (!client) {
+        throw new Error('Not connected to the marketplace contract. Configure it in Settings.');
       }
-      const all = getMockAgents();
-      return all.slice(offset, offset + PAGE_SIZE);
+      if (selectedSkills.length > 0) {
+        // Intersect agent IDs returned per selected skill, then hydrate.
+        const sets = await Promise.all(
+          selectedSkills.map((skill: string) => client.getAgentsBySkill(skill, offset, PAGE_SIZE)),
+        );
+        const intersection = sets[0].filter((id: number) =>
+          sets.every((s: number[]) => s.includes(id)),
+        );
+        return Promise.all(intersection.map((id: number) => client.getAgent(id)));
+      }
+      return client.getAllAgents(offset, PAGE_SIZE);
     },
     initialPageParam: 0,
     staleTime: 1000 * 60 * 5,
@@ -128,6 +81,8 @@ export const Marketplace: React.FC = () => {
   const {
     data: jobsPages,
     isLoading: jobsLoading,
+    error: jobsError,
+    refetch: refetchJobs,
     fetchNextPage: fetchNextJobsPage,
     hasNextPage: hasNextJobsPage,
     isFetchingNextPage: isFetchingNextJobsPage,
@@ -135,21 +90,13 @@ export const Marketplace: React.FC = () => {
     queryKey: ['jobs'],
     queryFn: async ({ pageParam }) => {
       const offset = (pageParam as number) ?? 0;
-      try {
-        const client = getContractClient();
-        if (client) {
-          const jobCount: number = await client.getJobCounter();
-          const ids = Array.from(
-            { length: Math.min(PAGE_SIZE, Math.max(0, jobCount - offset)) },
-            (_, i) => offset + i + 1
-          );
-          return Promise.all(ids.map((id: number) => client.getJob(id)));
-        }
-      } catch {
-        // fallback
+      const client = getContractClient();
+      if (!client) {
+        throw new Error('Not connected to the marketplace contract. Configure it in Settings.');
       }
-      const all = getMockJobs();
-      return all.slice(offset, offset + PAGE_SIZE);
+      // Fetch every job page; Open-only filtering happens client-side in
+      // `filteredJobs` so the page size stays consistent.
+      return client.getAllJobs(offset, PAGE_SIZE);
     },
     initialPageParam: 0,
     staleTime: 1000 * 60 * 5,
@@ -167,7 +114,11 @@ export const Marketplace: React.FC = () => {
   const { data: stats } = useQuery<PlatformStats>({
     queryKey: ['stats'],
     queryFn: async () => {
-      return getMockStats();
+      const client = getContractClient();
+      if (!client) {
+        throw new Error('Not connected to the marketplace contract. Configure it in Settings.');
+      }
+      return client.getPlatformStats();
     },
     staleTime: 1000 * 60 * 10,
   });
@@ -298,7 +249,7 @@ export const Marketplace: React.FC = () => {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 relative">
           <div className="text-center max-w-3xl mx-auto">
             <Badge variant="secondary" className="mb-4 text-sm px-3 py-1">
-              <TrendingUp className="mr-1 h-3 w-3" /> Live on Stellar Testnet • {stats?.totalAgents || 42} Agents • ${(stats?.totalVolume / 10000000 || 1250).toLocaleString()}K Volume
+              <TrendingUp className="mr-1 h-3 w-3" /> Live on Stellar Testnet • {stats?.totalAgents ?? 0} Agents • ${((stats?.totalVolume ?? 0) / 10000000).toLocaleString()}K Volume
             </Badge>
             <h1 className="text-4xl lg:text-6xl font-bold tracking-tight text-foreground mb-6">
               AI Agent{' '}
@@ -329,10 +280,10 @@ export const Marketplace: React.FC = () => {
           {/* Stats Bar */}
           <div className="mt-16 grid grid-cols-2 lg:grid-cols-4 gap-4">
             {[
-              { label: 'Active Agents', value: formatNumber(stats?.totalAgents || 42), icon: Users, color: 'text-primary' },
-              { label: 'Jobs Posted', value: formatNumber(stats?.totalJobs || 128), icon: TrendingUp, color: 'text-stellar' },
-              { label: 'Total Volume', value: '$' + formatNumber((stats?.totalVolume || 12500000000) / 10000000), icon: DollarSign, color: 'text-green-500' },
-              { label: 'Avg Completion', value: '5.2 days', icon: Clock, color: 'text-orange-500' },
+              { label: 'Active Agents', value: formatNumber(stats?.totalAgents ?? 0), icon: Users, color: 'text-primary' },
+              { label: 'Jobs Posted', value: formatNumber(stats?.totalJobs ?? 0), icon: TrendingUp, color: 'text-stellar' },
+              { label: 'Total Volume', value: '$' + formatNumber((stats?.totalVolume ?? 0) / 10000000), icon: DollarSign, color: 'text-green-500' },
+              { label: 'Avg Completion', value: stats?.avgJobCompletionTime ? `${(stats.avgJobCompletionTime / 86400).toFixed(1)} days` : '—', icon: Clock, color: 'text-orange-500' },
             ].map((stat, i) => (
               <Card key={i} className="border-primary/20 bg-primary/5">
                 <CardContent className="p-4 text-center">
@@ -455,6 +406,11 @@ export const Marketplace: React.FC = () => {
                   <AgentCardSkeleton key={i} />
                 ))}
               </div>
+            ) : agentsError ? (
+              <QueryError
+                message={(agentsError as Error)?.message}
+                onRetry={() => refetchAgents()}
+              />
             ) : filteredAgents.length === 0 ? (
               <EmptyState
                 icon="🤖"
@@ -498,6 +454,11 @@ export const Marketplace: React.FC = () => {
                   <JobCardSkeleton key={i} />
                 ))}
               </div>
+            ) : jobsError ? (
+              <QueryError
+                message={(jobsError as Error)?.message}
+                onRetry={() => refetchJobs()}
+              />
             ) : filteredJobs.length === 0 ? (
               <EmptyState
                 icon="🔍"
@@ -792,130 +753,8 @@ const EmptyState: React.FC<{
   </div>
 );
 
-// Mock Data Functions
-function getMockAgents(): Agent[] {
-  const skills = [
-    ['python', 'machine-learning', 'pytorch', 'data-science'],
-    ['javascript', 'typescript', 'react', 'nextjs', 'nodejs'],
-    ['rust', 'solana', 'smart-contracts', 'defi', 'anchor'],
-    ['go', 'kubernetes', 'microservices', 'distributed-systems'],
-    ['python', 'tensorflow', 'deep-learning', 'computer-vision'],
-    ['solidity', 'ethereum', 'foundry', 'smart-contracts'],
-    ['python', 'langchain', 'openai-api', 'nlp', 'rag'],
-    ['java', 'spring-boot', 'kafka', 'event-driven'],
-  ];
-
-  return Array.from({ length: 12 }, (_, i) => ({
-    id: i + 1,
-    owner: `G${'A'.repeat(54 - (i + 1).toString().length)}${(i + 1).toString().padStart(4, '0')}`,
-    name: [
-      'AI Code Assistant', 'ML Model Deployer', 'Smart Contract Auditor',
-      'Data Pipeline Builder', 'NLP Chatbot Creator', 'DeFi Strategy Bot',
-      'RAG System Architect', 'Trading Algorithm Designer',
-      'Computer Vision Expert', 'Blockchain Indexer', 'API Integration Bot', 'Test Generator AI'
-    ][i],
-    description: [
-      'Expert Python developer specializing in ML model deployment and optimization',
-      'Full-stack developer building scalable React/Node applications with AI integration',
-      'Security auditor for Soroban and Solana smart contracts with formal verification',
-      'Data engineer building robust ETL pipelines and real-time streaming systems',
-      'NLP specialist creating conversational AI and document processing systems',
-      'DeFi strategist designing yield optimization and arbitrage bots',
-      'RAG expert building knowledge retrieval systems with vector databases',
-      'Quant developer creating algorithmic trading strategies with backtesting',
-    ][i % 8],
-    skills: skills[i % skills.length],
-    pricePerTask: [50000000, 75000000, 100000000, 80000000, 120000000, 150000000, 90000000, 200000000][i % 8],
-    reputation: [4.8, 4.5, 4.9, 4.3, 4.7, 4.6, 4.4, 4.2][i % 8],
-    totalJobsCompleted: [12, 8, 15, 6, 10, 5, 7, 3][i % 8],
-    totalEarnings: [600000000, 600000000, 1500000000, 480000000, 1200000000, 750000000, 630000000, 600000000][i % 8],
-    isActive: true,
-    createdAt: Math.floor(Date.now() / 1000) - 86400 * [30, 60, 15, 90, 45, 120, 75, 180][i % 8],
-    skillsVerified: skills[i % skills.length].reduce((acc, s) => ({ ...acc, [s]: i % 3 !== 0 }), {}),
-    metadataUri: `ipfs://QmAgent${i + 1}Metadata`,
-  }));
-}
-
-function getMockJobs(): Job[] {
-  return [
-    {
-      id: 1,
-      client: 'GCLIENT123...',
-      title: 'Build Fraud Detection ML Model',
-      description: 'Need a binary classification model for credit card fraud detection. Must achieve >99% precision on imbalanced dataset. Experience with XGBoost/LightGBM required.',
-      requiredSkills: ['python', 'machine-learning', 'xgboost', 'data-science'],
-      budget: 150000000,
-      deadline: Math.floor(Date.now() / 1000) + 86400 * 14,
-      status: 'Open',
-      assignedAgent: null,
-      escrowAmount: 0,
-      createdAt: Math.floor(Date.now() / 1000) - 86400 * 2,
-    },
-    {
-      id: 2,
-      client: 'GCLIENT456...',
-      title: 'Soroban Smart Contract for Token Vesting',
-      description: 'Create a cliff + linear vesting contract with claim functionality. Must be auditable and gas-optimized. Include tests and deployment scripts.',
-      requiredSkills: ['rust', 'soroban', 'stellar', 'smart-contracts'],
-      budget: 80000000,
-      deadline: Math.floor(Date.now() / 1000) + 86400 * 10,
-      status: 'Open',
-      assignedAgent: null,
-      escrowAmount: 0,
-      createdAt: Math.floor(Date.now() / 1000) - 86400 * 1,
-    },
-    {
-      id: 3,
-      client: 'GCLIENT789...',
-      title: 'RAG Pipeline for Legal Documents',
-      description: 'Build a retrieval-augmented generation system for legal document Q&A. Use vector DB (Pinecone/Weaviate), chunking strategy, and citation tracking.',
-      requiredSkills: ['python', 'langchain', 'openai-api', 'nlp', 'rag'],
-      budget: 120000000,
-      deadline: Math.floor(Date.now() / 1000) + 86400 * 21,
-      status: 'Open',
-      assignedAgent: null,
-      escrowAmount: 0,
-      createdAt: Math.floor(Date.now() / 1000) - 86400 * 3,
-    },
-    {
-      id: 4,
-      client: 'GCLIENT012...',
-      title: 'Real-time Trading Dashboard with WebSocket',
-      description: 'React/TypeScript dashboard connecting to multiple exchange WebSockets. Order book visualization, position tracking, P&L calculation. Tailwind + Recharts.',
-      requiredSkills: ['typescript', 'react', 'nextjs', 'websocket', 'trading'],
-      budget: 60000000,
-      deadline: Math.floor(Date.now() / 1000) + 86400 * 7,
-      status: 'Open',
-      assignedAgent: null,
-      escrowAmount: 0,
-      createdAt: Math.floor(Date.now() / 1000) - 86400 * 5,
-    },
-    {
-      id: 5,
-      client: 'GCLIENT345...',
-      title: 'Automated Code Review Bot for GitHub',
-      description: 'GitHub App that reviews PRs using LLM. Checks for security issues, style, testing coverage. Posts inline comments. Configurable rules per repo.',
-      requiredSkills: ['python', 'github-api', 'openai-api', 'ast-parsing'],
-      budget: 90000000,
-      deadline: Math.floor(Date.now() / 1000) + 86400 * 14,
-      status: 'Open',
-      assignedAgent: null,
-      escrowAmount: 0,
-      createdAt: Math.floor(Date.now() / 1000) - 86400 * 1,
-    },
-  ];
-}
-
-function getMockStats(): PlatformStats {
-  return {
-    totalAgents: 42,
-    totalJobs: 128,
-    totalVolume: 12500000000,
-    totalFeesCollected: 125000000,
-    totalDisputes: 3,
-    avgJobCompletionTime: 86400 * 5,
-  };
-}
+// Mock data removed — the marketplace now reads agents, jobs and stats directly
+// from the on-chain contract via MarketplaceClient (see contexts/StellarContext).
 
 const formatPrice = (price: number) => {
   return new Intl.NumberFormat('en-US', {

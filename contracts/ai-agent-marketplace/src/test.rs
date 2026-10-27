@@ -965,3 +965,173 @@ fn test_get_agents_by_skill_pagination() {
 }
 
 
+
+// ==================== Bulk / Owner Lookup Tests ====================
+
+#[test]
+fn test_get_all_agents_pagination() {
+    let e = Env::default();
+    e.mock_all_auths();
+
+    let admin = Address::generate(&e);
+    let usdc = create_token_contract(&e);
+    let marketplace = create_marketplace_contract(&e, &admin, &usdc.address());
+
+    // Register 3 agents
+    for i in 0..3 {
+        let owner = Address::generate(&e);
+        marketplace.register_agent(
+            &owner,
+            &String::from_str(&e, "Agent"),
+            &String::from_str(&e, "Desc"),
+            &Vec::from_array(&e, [String::from_str(&e, "python")]),
+            &10_000_000,
+            &String::from_str(&e, "ipfs://test"),
+        );
+        let _ = i;
+    }
+
+    let page1 = marketplace.get_all_agents(&0, &2);
+    assert_eq!(page1.len(), 2);
+    assert_eq!(page1.get(0).unwrap().id, 1);
+    assert_eq!(page1.get(1).unwrap().id, 2);
+
+    let page2 = marketplace.get_all_agents(&2, &2);
+    assert_eq!(page2.len(), 1);
+    assert_eq!(page2.get(0).unwrap().id, 3);
+
+    // limit == 0 -> empty
+    assert_eq!(marketplace.get_all_agents(&0, &0).len(), 0);
+
+    // offset beyond end -> empty
+    assert_eq!(marketplace.get_all_agents(&10, &2).len(), 0);
+}
+
+#[test]
+fn test_get_all_jobs_pagination() {
+    let e = Env::default();
+    e.mock_all_auths();
+
+    let admin = Address::generate(&e);
+    let client_addr = Address::generate(&e);
+    let usdc = create_token_contract(&e);
+    let marketplace = create_marketplace_contract(&e, &admin, &usdc.address());
+
+    // Post 3 jobs
+    for _ in 0..3 {
+        marketplace.post_job(
+            &client_addr,
+            &String::from_str(&e, "Job"),
+            &String::from_str(&e, "Desc"),
+            &Vec::new(&e),
+            &10_000_000,
+            &14,
+        );
+    }
+
+    let page1 = marketplace.get_all_jobs(&0, &2);
+    assert_eq!(page1.len(), 2);
+    assert_eq!(page1.get(0).unwrap().id, 1);
+    assert_eq!(page1.get(1).unwrap().id, 2);
+    assert_eq!(page1.get(0).unwrap().status, JobStatus::Open);
+
+    let page2 = marketplace.get_all_jobs(&2, &2);
+    assert_eq!(page2.len(), 1);
+    assert_eq!(page2.get(0).unwrap().id, 3);
+
+    assert_eq!(marketplace.get_all_jobs(&0, &0).len(), 0);
+    assert_eq!(marketplace.get_all_jobs(&10, &2).len(), 0);
+}
+
+#[test]
+fn test_get_agent_by_owner() {
+    let e = Env::default();
+    e.mock_all_auths();
+
+    let admin = Address::generate(&e);
+    let owner = Address::generate(&e);
+    let other = Address::generate(&e);
+    let usdc = create_token_contract(&e);
+    let marketplace = create_marketplace_contract(&e, &admin, &usdc.address());
+
+    // No agent yet -> None
+    assert!(marketplace.get_agent_by_owner(&owner).is_none());
+
+    let agent_id = marketplace.register_agent(
+        &owner,
+        &String::from_str(&e, "Agent"),
+        &String::from_str(&e, "Desc"),
+        &Vec::from_array(&e, [String::from_str(&e, "python")]),
+        &10_000_000,
+        &String::from_str(&e, "ipfs://test"),
+    );
+
+    let found = marketplace.get_agent_by_owner(&owner);
+    assert!(found.is_some());
+    let agent = found.unwrap();
+    assert_eq!(agent.id, agent_id);
+    assert_eq!(agent.owner, owner);
+
+    // Unknown owner -> None
+    assert!(marketplace.get_agent_by_owner(&other).is_none());
+}
+
+#[test]
+fn test_get_escrow_by_job() {
+    let e = Env::default();
+    e.mock_all_auths();
+
+    let admin = Address::generate(&e);
+    let client_addr = Address::generate(&e);
+    let agent_owner = Address::generate(&e);
+    let usdc = create_token_contract(&e);
+    let marketplace = create_marketplace_contract(&e, &admin, &usdc.address());
+
+    let admin_token = TokenAdminClient::new(&e, &usdc.address());
+    admin_token.mint(&client_addr, &1_000_000_000);
+
+    // Job with no accepted bid -> None
+    let open_job_id = marketplace.post_job(
+        &client_addr,
+        &String::from_str(&e, "Open Job"),
+        &String::from_str(&e, "Desc"),
+        &Vec::new(&e),
+        &10_000_000,
+        &14,
+    );
+    assert!(marketplace.get_escrow_by_job(&open_job_id).is_none());
+
+    // Register agent, post a job, bid, and accept
+    marketplace.register_agent(
+        &agent_owner,
+        &String::from_str(&e, "Agent"),
+        &String::from_str(&e, "Desc"),
+        &Vec::new(&e),
+        &10_000_000,
+        &String::from_str(&e, "ipfs://test"),
+    );
+
+    let job_id = marketplace.post_job(
+        &client_addr,
+        &String::from_str(&e, "Job"),
+        &String::from_str(&e, "Desc"),
+        &Vec::new(&e),
+        &10_000_000,
+        &14,
+    );
+    let bid_id = marketplace.place_bid(
+        &agent_owner,
+        &job_id,
+        &10_000_000,
+        &1,
+        &String::from_str(&e, "Prop"),
+    );
+    marketplace.accept_bid(&client_addr, &job_id, &bid_id);
+
+    let esc = marketplace.get_escrow_by_job(&job_id);
+    assert!(esc.is_some());
+    let esc = esc.unwrap();
+    assert_eq!(esc.job_id, job_id);
+    assert_eq!(esc.amount, 10_000_000);
+    assert_eq!(esc.status, EscrowStatus::Funded);
+}

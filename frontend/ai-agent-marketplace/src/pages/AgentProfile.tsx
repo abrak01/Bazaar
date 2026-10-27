@@ -9,54 +9,14 @@ import { Textarea } from '@/components/ui/Textarea';
 import { Star, DollarSign, Clock, CheckCircle, Award, Shield, ExternalLink, MessageSquare, ArrowLeft, Wallet, Send, AlertCircle, Loader2 } from 'lucide-react';
 import { useWallet } from '@/contexts/WalletContext';
 import { useStellar } from '@/contexts/StellarContext';
+import type { Agent, Bid, Job, Review } from '@/lib/types';
+import { QueryError } from '@/components/ui/QueryError';
 import { formatPrice, getSkillColor } from '@/pages/Marketplace';
 import { clsx } from 'clsx';
 import { format, formatDistanceToNow } from 'date-fns';
 
 /** Number of items fetched per page from the contract. */
 const PAGE_SIZE = 20;
-
-interface Agent {
-  id: number;
-  owner: string;
-  name: string;
-  description: string;
-  skills: string[];
-  pricePerTask: number;
-  reputation: number;
-  totalJobsCompleted: number;
-  totalEarnings: number;
-  isActive: boolean;
-  createdAt: number;
-  skillsVerified: Record<string, boolean>;
-  metadataUri: string;
-}
-
-interface Job {
-  id: number;
-  client: string;
-  title: string;
-  description: string;
-  requiredSkills: string[];
-  budget: number;
-  deadline: number;
-  status: string;
-  assignedAgent: string | null;
-  bids: any[];
-  escrowAmount: number;
-  createdAt: number;
-}
-
-interface Bid {
-  id: number;
-  agent: string;
-  agentId: number;
-  amount: number;
-  proposedTimeline: number;
-  proposal: string;
-  submittedAt: number;
-  status: string;
-}
 
 export const AgentProfile: React.FC = () => {
   const { agentId } = useParams<{ agentId: string }>();
@@ -77,8 +37,10 @@ export const AgentProfile: React.FC = () => {
     queryKey: ['agent', agentIdNum],
     queryFn: async () => {
       const client = getContractClient();
-      // In real implementation: return client.getAgent(agentIdNum);
-      return getMockAgent(agentIdNum);
+      if (!client) {
+        throw new Error('Not connected to the marketplace contract. Configure it in Settings.');
+      }
+      return client.getAgent(agentIdNum);
     },
     enabled: !!agentIdNum,
   });
@@ -89,30 +51,22 @@ export const AgentProfile: React.FC = () => {
     fetchNextPage: fetchNextJobsPage,
     hasNextPage: hasNextJobsPage,
     isFetchingNextPage: isFetchingNextJobsPage,
+    error: jobsError,
+    refetch: refetchJobs,
   } = useInfiniteQuery<Job[]>({
     queryKey: ['agent-jobs', agentIdNum],
     queryFn: async ({ pageParam }) => {
       const offset = (pageParam as number) ?? 0;
       const client = getContractClient();
-      if (client) {
-        try {
-          if (agent) {
-            const ids: number[] = await client.getJobsByAgent(
-              agent.owner,
-              offset,
-              PAGE_SIZE
-            );
-            return Promise.all(ids.map((id: number) => client.getJob(id)));
-          }
-        } catch {
-          // fallback
-        }
+      if (!client) {
+        throw new Error('Not connected to the marketplace contract. Configure it in Settings.');
       }
-      const all = getMockAgentJobs(agentIdNum);
-      return all.slice(offset, offset + PAGE_SIZE);
+      if (!agent) return [];
+      const ids: number[] = await client.getJobsByAgent(agent.owner, offset, PAGE_SIZE);
+      return Promise.all(ids.map((id: number) => client.getJob(id)));
     },
     initialPageParam: 0,
-    enabled: !!agentIdNum,
+    enabled: !!agentIdNum && !!agent,
     getNextPageParam: (lastPage, allPages) =>
       lastPage.length === PAGE_SIZE
         ? allPages.reduce((sum, p) => sum + p.length, 0)
@@ -125,29 +79,23 @@ export const AgentProfile: React.FC = () => {
     fetchNextPage: fetchNextReviewsPage,
     hasNextPage: hasNextReviewsPage,
     isFetchingNextPage: isFetchingNextReviewsPage,
-  } = useInfiniteQuery({
+    error: reviewsError,
+    refetch: refetchReviews,
+  } = useInfiniteQuery<Review[]>({
     queryKey: ['agent-reviews', agentIdNum],
     queryFn: async ({ pageParam }) => {
       const offset = (pageParam as number) ?? 0;
       const client = getContractClient();
-      if (client && agent) {
-        try {
-          const ids: number[] = await client.getReviewsByReviewee(
-            agent.owner,
-            offset,
-            PAGE_SIZE
-          );
-          return Promise.all(ids.map((id: number) => client.getReview(id)));
-        } catch {
-          // fallback
-        }
+      if (!client) {
+        throw new Error('Not connected to the marketplace contract. Configure it in Settings.');
       }
-      const all = getMockReviews(agentIdNum);
-      return all.slice(offset, offset + PAGE_SIZE);
+      if (!agent) return [];
+      const ids: number[] = await client.getReviewsByReviewee(agent.owner, offset, PAGE_SIZE);
+      return Promise.all(ids.map((id: number) => client.getReview(id)));
     },
     initialPageParam: 0,
-    enabled: !!agentIdNum,
-    getNextPageParam: (lastPage: any[], allPages: any[][]) =>
+    enabled: !!agentIdNum && !!agent,
+    getNextPageParam: (lastPage, allPages) =>
       lastPage.length === PAGE_SIZE
         ? allPages.reduce((sum, p) => sum + p.length, 0)
         : undefined,
@@ -155,7 +103,7 @@ export const AgentProfile: React.FC = () => {
 
   // Flatten paginated results
   const jobs: Job[] = jobsPages?.pages.flat() ?? [];
-  const reviews = reviewsPages?.pages.flat() ?? [];
+  const reviews: Review[] = reviewsPages?.pages.flat() ?? [];
 
   // Sentinel refs for infinite scroll
   const jobsSentinelRef = useRef<HTMLDivElement>(null);
@@ -515,7 +463,9 @@ export const AgentProfile: React.FC = () => {
 
           {activeTab === 'jobs' && (
             <div className="space-y-4">
-              {jobs.length === 0 ? (
+              {jobsError ? (
+                <QueryError message={(jobsError as Error)?.message} onRetry={() => refetchJobs()} />
+              ) : jobs.length === 0 ? (
                 <Card>
                   <CardContent className="p-8 text-center">
                     <Clock className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
@@ -572,7 +522,9 @@ export const AgentProfile: React.FC = () => {
 
           {activeTab === 'reviews' && (
             <div className="space-y-4">
-              {reviews.length === 0 ? (
+              {reviewsError ? (
+                <QueryError message={(reviewsError as Error)?.message} onRetry={() => refetchReviews()} />
+              ) : reviews.length === 0 ? (
                 <Card>
                   <CardContent className="p-8 text-center">
                     <MessageSquare className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
@@ -582,16 +534,16 @@ export const AgentProfile: React.FC = () => {
                 </Card>
               ) : (
                 <>
-                  {reviews.map((review: any, i) => (
-                    <Card key={i}>
+                  {reviews.map((review: Review) => (
+                    <Card key={review.id}>
                       <CardContent className="p-4">
                         <div className="flex items-start gap-4">
                           <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-medium">
-                            {review.client?.charAt(0) || 'C'}
+                            {review.reviewer?.charAt(0) || 'C'}
                           </div>
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-1">
-                              <span className="font-medium">{review.client?.slice(0, 8)}...</span>
+                              <span className="font-medium">{review.reviewer?.slice(0, 8)}...</span>
                               <span className="text-sm text-muted-foreground">{format(new Date(review.createdAt * 1000), 'MMM d, yyyy')}</span>
                             </div>
                             <div className="flex items-center gap-1 mb-2">
@@ -689,90 +641,5 @@ function StatCard({ label, value, icon, color }: { label: string; value: string 
   );
 }
 
-function getMockAgent(id: number): Agent {
-  const agents = [
-    {
-      id: 1,
-      owner: 'GABC123...',
-      name: 'AI Code Assistant Pro',
-      description: 'Expert Python developer specializing in ML model deployment and optimization. 5+ years building production ML systems at scale. Experienced with PyTorch, TensorFlow, JAX, and ONNX Runtime. Strong background in MLOps, model serving, and performance optimization.',
-      skills: ['python', 'machine-learning', 'pytorch', 'tensorflow', 'mlops', 'docker', 'kubernetes'],
-      pricePerTask: 75000000,
-      reputation: 4.8,
-      totalJobsCompleted: 23,
-      totalEarnings: 1725000000,
-      isActive: true,
-      createdAt: Math.floor(Date.now() / 1000) - 86400 * 180,
-      skillsVerified: { python: true, 'machine-learning': true, pytorch: true, tensorflow: true, mlops: false, docker: true, kubernetes: false },
-      metadataUri: 'ipfs://QmAgent1Metadata',
-    },
-    {
-      id: 2,
-      owner: 'GDEF456...',
-      name: 'Smart Contract Auditor',
-      description: 'Security-focused smart contract auditor with expertise in Soroban/Rust and Solidity. 50+ audits completed with zero critical vulnerabilities missed. Specializes in DeFi protocols, tokenomics, and cross-chain bridges.',
-      skills: ['rust', 'soroban', 'stellar', 'solidity', 'smart-contracts', 'security-audit', 'defi'],
-      pricePerTask: 150000000,
-      reputation: 4.9,
-      totalJobsCompleted: 15,
-      totalEarnings: 2250000000,
-      isActive: true,
-      createdAt: Math.floor(Date.now() / 1000) - 86400 * 365,
-      skillsVerified: { rust: true, soroban: true, stellar: true, solidity: true, 'smart-contracts': true, 'security-audit': true, defi: true },
-      metadataUri: 'ipfs://QmAgent2Metadata',
-    },
-  ];
-  return agents[id - 1] || agents[0];
-}
-
-function getMockAgentJobs(agentId: number): Job[] {
-  return [
-    {
-      id: 1,
-      client: 'GCLIENT123...',
-      title: 'Build Fraud Detection ML Model',
-      description: 'Binary classification model for credit card fraud detection with >99% precision on imbalanced dataset.',
-      requiredSkills: ['python', 'machine-learning', 'xgboost'],
-      budget: 150000000,
-      deadline: Math.floor(Date.now() / 1000) + 86400 * 14,
-      status: 'Completed',
-      assignedAgent: 'GABC123...',
-      bids: [],
-      escrowAmount: 150000000,
-      createdAt: Math.floor(Date.now() / 1000) - 86400 * 30,
-    },
-    {
-      id: 2,
-      client: 'GCLIENT456...',
-      title: 'Optimize PyTorch Inference Pipeline',
-      description: 'Reduce model latency from 200ms to <50ms using ONNX Runtime and TensorRT optimization.',
-      requiredSkills: ['python', 'pytorch', 'onnx', 'tensorrt'],
-      budget: 80000000,
-      deadline: Math.floor(Date.now() / 1000) + 86400 * 10,
-      status: 'Completed',
-      assignedAgent: 'GABC123...',
-      bids: [],
-      escrowAmount: 80000000,
-      createdAt: Math.floor(Date.now() / 1000) - 86400 * 60,
-    },
-  ].filter((_, i) => i < (agentId === 1 ? 2 : 1));
-}
-
-function getMockReviews(agentId: number) {
-  return [
-    {
-      id: 1,
-      client: 'GCLIENT123...',
-      rating: 5,
-      comment: 'Exceptional work! Delivered a production-ready fraud detection model that exceeded our precision requirements. Great communication throughout the project.',
-      createdAt: Math.floor(Date.now() / 1000) - 86400 * 25,
-    },
-    {
-      id: 2,
-      client: 'GCLIENT456...',
-      rating: 5,
-      comment: 'Reduced our inference latency by 75% as promised. Code was clean, well-documented, and included comprehensive benchmarks.',
-      createdAt: Math.floor(Date.now() / 1000) - 86400 * 55,
-    },
-  ];
-}
+// Mock data removed — AgentProfile now reads agent, jobs and reviews directly
+// from the on-chain contract via MarketplaceClient.

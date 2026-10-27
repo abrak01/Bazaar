@@ -12,6 +12,8 @@ import {
 } from 'lucide-react';
 import { useWallet } from '@/contexts/WalletContext';
 import { useStellar } from '@/contexts/StellarContext';
+import type { Agent, Bid, Job, PlatformStats } from '@/lib/types';
+import { QueryError } from '@/components/ui/QueryError';
 import { formatPrice, getSkillColor } from '@/pages/Marketplace';
 import { clsx } from 'clsx';
 import { format, formatDistanceToNow } from 'date-fns';
@@ -27,45 +29,6 @@ const statusConfig = {
   Cancelled: { label: 'Cancelled', color: 'secondary' as const, icon: AlertCircle },
   Refunded: { label: 'Refunded', color: 'secondary' as const, icon: AlertCircle },
 };
-
-interface Job {
-  id: number;
-  client: string;
-  title: string;
-  description: string;
-  requiredSkills: string[];
-  budget: number;
-  deadline: number;
-  status: 'Open' | 'InProgress' | 'Completed' | 'Disputed' | 'Cancelled' | 'Refunded';
-  assignedAgent: string | null;
-  bids: any[];
-  escrowAmount: number;
-  createdAt: number;
-  completedAt: number | null;
-  deliverableHash: string | null;
-  disputeRaised: boolean;
-}
-
-interface Agent {
-  id: number;
-  owner: string;
-  name: string;
-  reputation: number;
-  totalJobsCompleted: number;
-  totalEarnings: number;
-  isActive: boolean;
-  skills: string[];
-  skillsVerified: Record<string, boolean>;
-}
-
-interface PlatformStats {
-  totalAgents: number;
-  totalJobs: number;
-  totalVolume: number;
-  totalFeesCollected: number;
-  totalDisputes: number;
-  avgJobCompletionTime: number;
-}
 
 export const Dashboard: React.FC = () => {
   const { publicKey, isConnected } = useWallet();
@@ -90,21 +53,24 @@ export const Dashboard: React.FC = () => {
     );
   }
 
-  const { data: myJobsPages, isLoading: jobsLoading, fetchNextPage: fetchNextJobsPage, hasNextPage: hasNextJobsPage, isFetchingNextPage: isFetchingNextJobsPage } = useInfiniteQuery<Job[]>({
+  const {
+    data: myJobsPages,
+    isLoading: jobsLoading,
+    error: jobsError,
+    refetch: refetchJobs,
+    fetchNextPage: fetchNextJobsPage,
+    hasNextPage: hasNextJobsPage,
+    isFetchingNextPage: isFetchingNextJobsPage,
+  } = useInfiniteQuery<Job[]>({
     queryKey: ['myJobs', publicKey],
     queryFn: async ({ pageParam }) => {
       const offset = (pageParam as number) ?? 0;
       const client = getContractClient();
-      if (client) {
-        try {
-          const ids: number[] = await client.getJobsByClient(publicKey, offset, PAGE_SIZE);
-          return Promise.all(ids.map((id: number) => client.getJob(id)));
-        } catch {
-          // fallback
-        }
+      if (!client) {
+        throw new Error('Not connected to the marketplace contract. Configure it in Settings.');
       }
-      const all = getMockMyJobs(publicKey);
-      return all.slice(offset, offset + PAGE_SIZE);
+      const ids: number[] = await client.getJobsByClient(publicKey, offset, PAGE_SIZE);
+      return Promise.all(ids.map((id: number) => client.getJob(id)));
     },
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) =>
@@ -113,24 +79,27 @@ export const Dashboard: React.FC = () => {
         : undefined,
   });
 
-  const { data: myBidsPages, isLoading: bidsLoading, fetchNextPage: fetchNextBidsPage, hasNextPage: hasNextBidsPage, isFetchingNextPage: isFetchingNextBidsPage } = useInfiniteQuery({
+  const {
+    data: myBidsPages,
+    isLoading: bidsLoading,
+    error: bidsError,
+    refetch: refetchBids,
+    fetchNextPage: fetchNextBidsPage,
+    hasNextPage: hasNextBidsPage,
+    isFetchingNextPage: isFetchingNextBidsPage,
+  } = useInfiniteQuery<Bid[]>({
     queryKey: ['myBids', publicKey],
     queryFn: async ({ pageParam }) => {
       const offset = (pageParam as number) ?? 0;
       const client = getContractClient();
-      if (client) {
-        try {
-          const ids: number[] = await client.getBidsByAgent(publicKey, offset, PAGE_SIZE);
-          return Promise.all(ids.map((id: number) => client.getBid(id)));
-        } catch {
-          // fallback
-        }
+      if (!client) {
+        throw new Error('Not connected to the marketplace contract. Configure it in Settings.');
       }
-      const all = getMockMyBids(publicKey);
-      return all.slice(offset, offset + PAGE_SIZE);
+      const ids: number[] = await client.getBidsByAgent(publicKey, offset, PAGE_SIZE);
+      return Promise.all(ids.map((id: number) => client.getBid(id)));
     },
     initialPageParam: 0,
-    getNextPageParam: (lastPage: any[], allPages: any[][]) =>
+    getNextPageParam: (lastPage, allPages) =>
       lastPage.length === PAGE_SIZE
         ? allPages.reduce((sum, p) => sum + p.length, 0)
         : undefined,
@@ -138,7 +107,7 @@ export const Dashboard: React.FC = () => {
 
   // Flatten paginated results
   const myJobs: Job[] = myJobsPages?.pages.flat() ?? [];
-  const myBids = myBidsPages?.pages.flat() ?? [];
+  const myBids: Bid[] = myBidsPages?.pages.flat() ?? [];
 
   // Sentinel refs for infinite scroll
   const jobsSentinelRef = useRef<HTMLDivElement>(null);
@@ -170,11 +139,14 @@ export const Dashboard: React.FC = () => {
     return () => observer.disconnect();
   }, [hasNextBidsPage, isFetchingNextBidsPage, fetchNextBidsPage]);
 
-  const { data: myAgent } = useQuery<Agent | null>({
+  const { data: myAgent, error: myAgentError, refetch: refetchMyAgent } = useQuery<Agent | null>({
     queryKey: ['myAgent', publicKey],
     queryFn: async () => {
       const client = getContractClient();
-      return getMockMyAgent(publicKey);
+      if (!client) {
+        throw new Error('Not connected to the marketplace contract. Configure it in Settings.');
+      }
+      return client.getAgentByOwner(publicKey);
     },
   });
 
@@ -182,7 +154,10 @@ export const Dashboard: React.FC = () => {
     queryKey: ['dashboardStats'],
     queryFn: async () => {
       const client = getContractClient();
-      return getMockStats();
+      if (!client) {
+        throw new Error('Not connected to the marketplace contract. Configure it in Settings.');
+      }
+      return client.getPlatformStats();
     },
     staleTime: 1000 * 60 * 10,
   });
@@ -236,7 +211,7 @@ export const Dashboard: React.FC = () => {
           />
           <StatCard 
             label="Pending Bids" 
-            value={myBids.filter(b => b.status === 'Pending').length} 
+            value={myBids.filter((b: Bid) => b.status === 'Pending').length} 
             icon={Send} 
             color="text-stellar" 
           />
@@ -379,6 +354,8 @@ export const Dashboard: React.FC = () => {
           <div className="space-y-4">
             {jobsLoading ? (
               <JobsSkeleton />
+            ) : jobsError ? (
+              <QueryError message={(jobsError as Error)?.message} onRetry={() => refetchJobs()} />
             ) : myJobs.length === 0 ? (
               <EmptyState 
                 icon={FileText} 
@@ -412,6 +389,8 @@ export const Dashboard: React.FC = () => {
           <div className="space-y-4">
             {bidsLoading ? (
               <BidsSkeleton />
+            ) : bidsError ? (
+              <QueryError message={(bidsError as Error)?.message} onRetry={() => refetchBids()} />
             ) : myBids.length === 0 ? (
               <EmptyState 
                 icon={Send} 
@@ -421,7 +400,7 @@ export const Dashboard: React.FC = () => {
               />
             ) : (
               <>
-                {myBids.map((bid: any) => (
+                {myBids.map((bid: Bid) => (
                   <BidCard key={bid.id} bid={bid} />
                 ))}
                 {/* Infinite-scroll sentinel */}
@@ -443,7 +422,9 @@ export const Dashboard: React.FC = () => {
 
         {activeTab === 'myAgent' && (
           <div className="space-y-6">
-            {myAgent ? (
+            {myAgentError ? (
+              <QueryError message={(myAgentError as Error)?.message} onRetry={() => refetchMyAgent()} />
+            ) : myAgent ? (
               <AgentProfileCard agent={myAgent} isOwner={true} />
             ) : (
               <EmptyState 
@@ -598,13 +579,17 @@ function JobCard({ job, isClient }: { job: Job; isClient: boolean }) {
   );
 }
 
-function BidCard({ bid }: { bid: any }) {
+function BidCard({ bid }: { bid: Bid }) {
   const statusCfg = {
     Pending: { label: 'Pending', color: 'default' as const },
     Accepted: { label: 'Accepted', color: 'success' as const },
     Rejected: { label: 'Rejected', color: 'destructive' as const },
     Withdrawn: { label: 'Withdrawn', color: 'secondary' as const },
-  }[bid.status];
+  }[bid.status] ?? { label: bid.status, color: 'secondary' as const };
+
+  const timelineDays = bid.proposedTimeline
+    ? Math.max(0, Math.ceil((bid.proposedTimeline * 1000 - Date.now()) / (1000 * 60 * 60 * 24)))
+    : null;
 
   return (
     <Card>
@@ -612,11 +597,17 @@ function BidCard({ bid }: { bid: any }) {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div className="flex-1">
             <div className="flex items-center gap-3 mb-2">
-              <h4 className="font-semibold">{bid.jobTitle}</h4>
+              <span className="font-semibold text-foreground">Bid #{bid.id}</span>
               <Badge variant={statusCfg.color}>{statusCfg.label}</Badge>
             </div>
-            <p className="text-sm text-muted-foreground">Your bid: {formatPrice(bid.amount)} • {bid.timeline}d timeline</p>
-            <p className="text-sm text-muted-foreground mt-1">{bid.proposal.slice(0, 100)}...</p>
+            <p className="text-sm text-muted-foreground">
+              Amount: {formatPrice(bid.amount)}
+              {timelineDays !== null ? ` • ${timelineDays}d timeline` : ''}
+            </p>
+            <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{bid.proposal}</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              For job #{bid.agentId} · Agent {bid.agent.slice(0, 8)}...
+            </p>
           </div>
           <div className="text-right">
             <p className="text-sm text-muted-foreground">Submitted</p>
@@ -781,121 +772,5 @@ function EmptyState({ icon: Icon, title, description, action }: {
   );
 }
 
-function getMockMyJobs(publicKey: string): Job[] {
-  return [
-    {
-      id: 1,
-      client: publicKey,
-      title: 'Build Fraud Detection ML Model',
-      description: 'Binary classification for credit card fraud with >99% precision...',
-      requiredSkills: ['python', 'machine-learning', 'xgboost'],
-      budget: 150000000,
-      deadline: Math.floor(Date.now() / 1000) + 86400 * 10,
-      status: 'InProgress',
-      assignedAgent: 'GABC123...',
-      bids: [],
-      escrowAmount: 120000000,
-      createdAt: Math.floor(Date.now() / 1000) - 86400 * 5,
-      completedAt: null,
-      deliverableHash: null,
-      disputeRaised: false,
-    },
-    {
-      id: 2,
-      client: publicKey,
-      title: 'React Dashboard with Real-time Charts',
-      description: 'Build a dashboard with WebSocket updates...',
-      requiredSkills: ['react', 'typescript', 'websocket', 'recharts'],
-      budget: 80000000,
-      deadline: Math.floor(Date.now() / 1000) - 86400 * 2,
-      status: 'Completed',
-      assignedAgent: 'GDEF456...',
-      bids: [],
-      escrowAmount: 80000000,
-      createdAt: Math.floor(Date.now() / 1000) - 86400 * 20,
-      completedAt: Math.floor(Date.now() / 1000) - 86400 * 2,
-      deliverableHash: '0x123...',
-      disputeRaised: false,
-    },
-    {
-      id: 3,
-      client: publicKey,
-      title: 'Smart Contract Security Audit',
-      description: 'Audit a DeFi protocol for vulnerabilities...',
-      requiredSkills: ['rust', 'soroban', 'security-audit'],
-      budget: 200000000,
-      deadline: Math.floor(Date.now() / 1000) + 86400 * 30,
-      status: 'Open',
-      assignedAgent: null,
-      bids: [
-        { id: 1, agent: 'GAUDIT1...', agentId: 3, amount: 180000000, proposedTimeline: 0, proposal: '...', submittedAt: 0, status: 'Pending' },
-        { id: 2, agent: 'GAUDIT2...', agentId: 4, amount: 190000000, proposedTimeline: 0, proposal: '...', submittedAt: 0, status: 'Pending' },
-      ],
-      escrowAmount: 0,
-      createdAt: Math.floor(Date.now() / 1000) - 86400,
-      completedAt: null,
-      deliverableHash: null,
-      disputeRaised: false,
-    },
-  ];
-}
-
-function getMockMyBids(publicKey: string) {
-  return [
-    {
-      id: 1,
-      jobId: 10,
-      jobTitle: 'Build Fraud Detection ML Model',
-      amount: 120000000,
-      timeline: 10,
-      proposal: 'I have 5+ years building fraud detection systems...',
-      submittedAt: Math.floor(Date.now() / 1000) - 86400,
-      status: 'Pending',
-    },
-    {
-      id: 2,
-      jobId: 11,
-      jobTitle: 'Optimize PyTorch Inference Pipeline',
-      amount: 75000000,
-      timeline: 7,
-      proposal: 'Expert in ONNX Runtime and TensorRT optimization...',
-      submittedAt: Math.floor(Date.now() / 1000) - 86400 * 2,
-      status: 'Accepted',
-    },
-    {
-      id: 3,
-      jobId: 12,
-      jobTitle: 'NLP Model Fine-tuning for Legal Docs',
-      amount: 90000000,
-      timeline: 14,
-      proposal: 'Experience with legal BERT and domain adaptation...',
-      submittedAt: Math.floor(Date.now() / 1000) - 86400 * 5,
-      status: 'Rejected',
-    },
-  ];
-}
-
-function getMockMyAgent(publicKey: string): Agent | null {
-  return {
-    id: 1,
-    owner: publicKey,
-    name: 'AI Code Assistant Pro',
-    reputation: 4.8,
-    totalJobsCompleted: 23,
-    totalEarnings: 1725000000,
-    isActive: true,
-    skills: ['python', 'machine-learning', 'pytorch', 'tensorflow', 'mlops', 'docker', 'kubernetes'],
-    skillsVerified: { python: true, 'machine-learning': true, pytorch: true, tensorflow: true, mlops: false, docker: true, kubernetes: false },
-  };
-}
-
-function getMockStats(): PlatformStats {
-  return {
-    totalAgents: 42,
-    totalJobs: 128,
-    totalVolume: 12500000000,
-    totalFeesCollected: 125000000,
-    totalDisputes: 3,
-    avgJobCompletionTime: 86400 * 5,
-  };
-}
+// Mock data removed — Dashboard now reads my-jobs, my-bids, my-agent and
+// platform stats directly from the on-chain contract via MarketplaceClient.
