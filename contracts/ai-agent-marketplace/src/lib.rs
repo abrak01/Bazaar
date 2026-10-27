@@ -1509,6 +1509,75 @@ impl AiAgentMarketplace {
         Self::paginate(&env, &all, offset, limit)
     }
 
+    /// Get all agents (paginated).
+    ///
+    /// Returns full `Agent` records for the page starting at `offset` with at
+    /// most `limit` entries. Agent IDs are sequential and never deleted, so a
+    /// list index `i` maps to agent id `i + 1`. Returns an empty Vec when
+    /// `offset` is beyond the last agent or `limit` is 0.
+    pub fn get_all_agents(env: Env, offset: u64, limit: u64) -> Vec<Agent> {
+        let count: u64 = env.storage().instance()
+            .get(&DataKey::AgentCounter)
+            .unwrap_or(0);
+        let mut page = Vec::new(&env);
+        if limit == 0 || offset >= count {
+            return page;
+        }
+        let end = (offset + limit).min(count);
+        for idx in offset..end {
+            let id = idx + 1;
+            if let Ok(agent) = Self::get_agent(&env, id) {
+                page.push_back(agent);
+            }
+        }
+        page
+    }
+
+    /// Get all jobs (paginated).
+    ///
+    /// Returns full `Job` records for the page starting at `offset` with at
+    /// most `limit` entries. Job IDs are sequential and never deleted, so a
+    /// list index `i` maps to job id `i + 1`. Callers can filter the returned
+    /// page client-side by status (e.g. only show `Open` jobs). Returns an
+    /// empty Vec when `offset` is beyond the last job or `limit` is 0.
+    pub fn get_all_jobs(env: Env, offset: u64, limit: u64) -> Vec<Job> {
+        let count: u64 = env.storage().instance()
+            .get(&DataKey::JobCounter)
+            .unwrap_or(0);
+        let mut page = Vec::new(&env);
+        if limit == 0 || offset >= count {
+            return page;
+        }
+        let end = (offset + limit).min(count);
+        for idx in offset..end {
+            let id = idx + 1;
+            if let Ok(job) = Self::get_job(&env, id) {
+                page.push_back(job);
+            }
+        }
+        page
+    }
+
+    /// Get the agent owned by `owner`, if any.
+    ///
+    /// Returns `Some(Agent)` when the owner has registered an agent, otherwise
+    /// `None`.
+    pub fn get_agent_by_owner(env: Env, owner: Address) -> Option<Agent> {
+        let agent_id: Option<u64> = env.storage().instance()
+            .get(&DataKey::AgentByOwner(owner));
+        agent_id.and_then(|id| Self::get_agent(&env, id).ok())
+    }
+
+    /// Get the escrow funding a job, if any.
+    ///
+    /// Returns `Some(Escrow)` when a bid has been accepted and escrow funded
+    /// for the job, otherwise `None`.
+    pub fn get_escrow_by_job(env: Env, job_id: u64) -> Option<Escrow> {
+        let escrow_id: Option<u64> = env.storage().instance()
+            .get(&DataKey::EscrowByJob(job_id));
+        escrow_id.and_then(|id| Self::get_escrow(&env, id).ok())
+    }
+
     /// Get platform configuration
     pub fn get_config(env: Env) -> Result<Config, Error> {
         Self::get_config(&env)
