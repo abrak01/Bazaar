@@ -1,4 +1,4 @@
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense, lazy, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 
@@ -18,6 +18,19 @@ const Loading = () => (
 );
 
 function App() {
+  // Apply the persisted theme before any paint to avoid a flash of wrong colour.
+  useEffect(() => {
+    const stored = localStorage.getItem('theme');
+    if (stored === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else if (stored === 'system') {
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.classList.toggle('dark', prefersDark);
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, []);
+
   return (
     <div className="min-h-screen bg-background">
       <Routes>
