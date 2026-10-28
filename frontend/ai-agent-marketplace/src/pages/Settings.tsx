@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTheme } from '@/hooks/useTheme';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -21,7 +22,7 @@ export const Settings: React.FC = () => {
   const { publicKey, isConnected, disconnect, balance } = useWallet();
   const { getContractClient } = useStellar();
   const [activeTab, setActiveTab] = useState<'profile' | 'wallet' | 'notifications' | 'security' | 'appearance'>('profile');
-  const [darkMode, setDarkMode] = useState(false);
+  const { theme, setTheme, isDark } = useTheme();
   const [notifications, setNotifications] = useState({
     emailJobUpdates: true,
     emailBidUpdates: true,
@@ -352,20 +353,20 @@ export const Settings: React.FC = () => {
                   <ThemeOption 
                     name="Light" 
                     icon={Sun} 
-                    selected={!darkMode} 
-                    onClick={() => setDarkMode(false)} 
+                    selected={theme === 'light'} 
+                    onClick={() => setTheme('light')} 
                   />
                   <ThemeOption 
                     name="Dark" 
                     icon={Moon} 
-                    selected={darkMode} 
-                    onClick={() => setDarkMode(true)} 
+                    selected={theme === 'dark'} 
+                    onClick={() => setTheme('dark')} 
                   />
                   <ThemeOption 
                     name="System" 
                     icon={Globe} 
-                    selected={false} 
-                    onClick={() => setDarkMode(false)} 
+                    selected={theme === 'system'} 
+                    onClick={() => setTheme('system')} 
                   />
                 </div>
               </CardContent>
